@@ -7,6 +7,5 @@
     </head>
     <body>
         <x-inertia::app />
-        <h1>Laravel + InertiaJS</h1>
     </body>
 </html>
