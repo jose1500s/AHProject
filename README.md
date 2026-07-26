@@ -1,6 +1,6 @@
 # Auction House Web
 
-Aplicación web para consultar y analizar la Auction House de World of Warcraft utilizando la Blizzard Game Data API.
+Aplicación web para consultar y analizar la Auction House.
 ## Características
 
 - Consulta de subastas por reino.
