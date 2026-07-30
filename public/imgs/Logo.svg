@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 90" width="420" height="90">
+  <defs>
+    <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#151833"/>
+      <stop offset="100%" stop-color="#0b0d1f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="iconBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.4"/>
+    </linearGradient>
+    <!-- glow fuerte para el wordmark -->
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- glow suave para el icono, para no perder el detalle de la A -->
+    <filter id="glowIcon" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="0.8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="420" height="90" fill="none"/>
+
+  <!-- Icon -->
+  <rect x="8" y="8" width="74" height="74" rx="16" fill="url(#iconBg)" stroke="url(#iconBorder)" stroke-width="1.5"/>
+  <text x="45" y="56" text-anchor="middle" font-family="Arial, Helvetica, sans-serif"
+        font-size="29" font-weight="800" fill="url(#accent)" filter="url(#glowIcon)" letter-spacing="-1">AT</text>
+
+  <!-- Wordmark -->
+  <text x="100" y="45" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="800"
+        fill="#f8fafc" letter-spacing="1">AUCTION
+    <tspan fill="url(#accent)" filter="url(#glow)"> TERMINAL</tspan>
+  </text>
+
+  <!-- Subtitle -->
+  <text x="101" y="65" font-family="Consolas, 'Courier New', monospace" font-size="13.5"
+        fill="#94a3b8" letter-spacing="2.5">MARKET ANALYTICS</text>
+</svg>
