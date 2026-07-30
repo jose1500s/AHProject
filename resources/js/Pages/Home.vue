@@ -1,10 +1,16 @@
 <script setup>
+import Layout from './Layout.vue'
+
+
 import { ref } from 'vue'
 const props = defineProps({
-    test: String
+    test: String,
+    auctions: Array
 })
 </script>
 
 <template>
-        <h1>Hello world{{ props.test }}</h1>
+    <Layout>
+        
+    </Layout>
 </template>
