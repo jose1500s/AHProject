@@ -45,7 +45,9 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
              transition-colors hover:border-indigo-400/60 focus:outline-none focus:border-indigo-400"
     >
       <span>{{ modelValue }}</span>
-      <ChevronDown class="size-4 text-indigo-300 transition-transform duration-200"/>
+      <ChevronDown class="size-4 text-indigo-300 transition-transform duration-200"
+      :class="{'rotate-180': isOpen}"
+      />
     </button>
 
     <ul
