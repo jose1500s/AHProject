@@ -4,8 +4,7 @@ import ItemCard from './Components/ItemCard.vue';
 
 import { ref } from 'vue'
 const props = defineProps({
-    test: String,
-    auctions: Array
+    realms: Array
 })
 </script>
 
@@ -22,5 +21,6 @@ const props = defineProps({
                 :volume="1820" 
             />
         </div>
+        {{ realms }}
     </Layout>
 </template>
