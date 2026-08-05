@@ -1,4 +1,3 @@
-<!-- Components/ui/RefreshButton.vue -->
 <script setup>
 import { ref } from 'vue'
 import { RefreshCw } from '@lucide/vue';

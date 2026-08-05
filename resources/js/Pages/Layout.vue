@@ -17,7 +17,6 @@ function onRefresh() {
 </script>
 
 <template>
-    <slot></slot>
     <div class="w-full" id="navbar">
         <nav class=" flex items-center justify-center gap-5 w-[90vw] h-20 mx-auto">
             <div class="w-1/6 flex h-full gap-2.5 items-center">
@@ -40,6 +39,7 @@ function onRefresh() {
             </div>
         </nav>
     </div>
+    <slot></slot>
 </template>
 
 <style scoped>
