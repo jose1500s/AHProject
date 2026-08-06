@@ -4,13 +4,22 @@ import InputText from './Components/InputText.vue';
 import CustomSelect from './Components/CustomSelect.vue';
 import TimeAgoBadge from './Components/TimeAgoBadge.vue';
 import RefreshButton from './Components/RefreshButton.vue';
+import { usePersistedRef } from '../Composables/usePersistedRef.js'
+
 
 const props = defineProps({
     realms: Array
 })
 
 const region = ref('US')
-const realm = ref(props.realms[0]?.name ?? '')
+const DEFAULT_REALM = 'Illidan'
+const fallbackRealm = props.realms.find(r => r.name === DEFAULT_REALM)?.name ?? props.realms[0]?.name ?? ''
+
+const realm = usePersistedRef('preferred_realm', fallbackRealm)
+
+if (!props.realms.some(r => r.name === realm.value)) {
+  realm.value = fallbackRealm
+}
 
 
 function onRefresh() {
