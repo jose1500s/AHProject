@@ -9,7 +9,7 @@ const props = defineProps({
 </script>
 
 <template>
-    <Layout>
+    <Layout :realms="realms">
         <div class="flex mt-5 items-center justify-center gap-5 w-[90vw] mx-auto">
             <ItemCard 
                 name="Flor de Tranquilidad"
@@ -21,6 +21,5 @@ const props = defineProps({
                 :volume="1820" 
             />
         </div>
-        {{ realms }}
     </Layout>
 </template>

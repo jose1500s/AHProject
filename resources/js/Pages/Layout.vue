@@ -5,10 +5,13 @@ import CustomSelect from './Components/CustomSelect.vue';
 import TimeAgoBadge from './Components/TimeAgoBadge.vue';
 import RefreshButton from './Components/RefreshButton.vue';
 
-const region = ref('US')
-const realm = ref('Illidan')
+const props = defineProps({
+    realms: Array
+})
 
-const realms = ['Illidan', 'Stormrage', 'Tichondrius', "Mal'Ganis", 'Area 52', 'Sargeras', 'Bleeding Hollow', 'Frostmourne']
+const region = ref('US')
+const realm = ref(props.realms[0]?.name ?? '')
+
 
 function onRefresh() {
     // llamada para refrescar datos
@@ -29,8 +32,8 @@ function onRefresh() {
             </div>
             <div class="w-[30%] h-full flex items-center">
                 <div class="flex gap-3">
-                    <CustomSelect v-model="region" :options="['US', 'EU', 'KR', 'TW']" label="Region" />
-                    <CustomSelect v-model="realm" :options="realms" label="Realm" />
+                    <CustomSelect v-model="region" :options="['US']" label="Region" />
+                    <CustomSelect v-model="realm" :options="realms.map(r => r.name)" label="Realm" />
                 </div>
                 <div class="flex items-center gap-3 mt-5 ml-4">
                     <TimeAgoBadge label="1h ago" />
