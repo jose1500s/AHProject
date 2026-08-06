@@ -33,12 +33,16 @@ class BlizzApiService
 
     public function getRealms(): array
     {
-        $response = Http::withToken($this->getAccessToken())
-            ->get("https://{$this->region}.api.blizzard.com/data/wow/realm/index", [
-                'namespace' => "dynamic-{$this->region}",
-                'locale' => 'en_US',
-            ]);
+        return Cache::remember('blizzard_realms', now()->addDay(), function () {
+            $response = Http::withToken($this->getAccessToken())
+                ->get("https://{$this->region}.api.blizzard.com/data/wow/realm/index", [
+                    'namespace' => "dynamic-{$this->region}",
+                    'locale' => 'en_US',
+                ]);
 
-        return $response->json('realms', []);
+            return collect($response->json('realms', []))
+                ->map(fn($r) => ['id' => $r['id'], 'name' => $r['name']])
+                ->values()->all();
+        });
     }
 }
