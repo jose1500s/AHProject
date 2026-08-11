@@ -4,7 +4,7 @@ import { Sparkles, ChevronRight, ListOrdered } from '@lucide/vue'
 defineProps({
   name: String,
   subtitle: String,
-  icon: { type: Object, default: () => Sparkles },
+  icon: { type: [Object, Function], default: () => Sparkles },
   gold: Number,
   silver: Number,
   copper: Number,
@@ -56,7 +56,7 @@ defineProps({
         <ListOrdered class="size-3.5" />
         <span>{{ listings }} listings</span>
       </div>
-      <span>Vol {{ volume?.toLocaleString() }}</span>
+      <span>Vol {{ volume?.toLocaleString('en-US') }}</span>
     </div>
   </div>
 </template>
