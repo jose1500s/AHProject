@@ -12,6 +12,9 @@ class Main extends Controller
     {
         return Inertia::render('Home', [
             'realms' => fn() => $blizzard->getRealms(),
+            'auctions' => fn() => $request->query('realm')
+                ? $blizzard->getAuctions($request->query('realm'))
+                : [],
         ]);
     }
 }

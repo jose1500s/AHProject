@@ -3,10 +3,20 @@ import Layout from './Layout.vue'
 import ItemCard from './Components/ItemCard.vue';
 import CategoryFilter from './Components/CategoryFilter.vue';
 
-import { ref } from 'vue'
+import { watch } from 'vue'
 const props = defineProps({
-    realms: Array
+    realms: Array,
+    auctions: Array
 })
+
+watch(
+  () => props.auctions,
+  (auctions) => {
+    console.log('auctions recibidas:', auctions.length)
+    console.log('primeras 5:', auctions.slice(0, 5))
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
