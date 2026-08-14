@@ -30,7 +30,7 @@ function onRefresh() {
 
 <template>
     <div class="w-full" id="navbar">
-        <nav class=" flex items-center justify-center gap-5 w-[90vw] h-20 mx-auto">
+        <nav class=" flex items-center justify-between gap-5 w-[90vw] h-20 mx-auto">
             <div class="w-1/6 flex h-full gap-2.5 items-center">
                 <div>
                     <img src="../../../public/imgs/Logo.svg">
