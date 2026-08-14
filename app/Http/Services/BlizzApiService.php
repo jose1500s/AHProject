@@ -4,6 +4,9 @@ namespace App\Http\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use App\Models\Item;
+use Illuminate\Support\Facades\Storage;
+
 
 class BlizzApiService
 {
@@ -113,6 +116,7 @@ class BlizzApiService
                 fn($id) =>
                 $pool->as($id)
                     ->withToken($token)
+                    ->timeout(15)
                     ->get("https://{$this->region}.api.blizzard.com/data/wow/item/{$id}", [
                         'namespace' => "static-{$this->region}",
                         'locale' => 'en_US',
@@ -133,5 +137,169 @@ class BlizzApiService
                 'icon_url' => null, // lo llenamos aparte con el endpoint de media
             ])
             ->values()->all();
+    }
+
+    public function getItemMediaBulk(array $itemIds): array
+    {
+        $token = $this->getAccessToken();
+
+        $responses = Http::pool(
+            fn($pool) =>
+            collect($itemIds)->map(
+                fn($id) =>
+                $pool->as($id)
+                    ->withToken($token)
+                    ->timeout(15)
+                    ->get("https://{$this->region}.api.blizzard.com/data/wow/media/item/{$id}", [
+                        'namespace' => "static-{$this->region}",
+                        'locale' => 'en_US',
+                    ])
+            )->all()
+        );
+
+        return collect($responses)
+            ->filter(fn($r) => $r->ok())
+            ->mapWithKeys(fn($r, $id) => [
+                $id => collect($r->json('assets', []))->firstWhere('key', 'icon')['value'] ?? null,
+            ])
+            ->all();
+    }
+
+    protected function downloadAndStoreIcon(int $itemId, ?string $iconUrl): ?string
+    {
+        if (!$iconUrl)
+            return null;
+
+        $path = "icons/{$itemId}.jpg";
+
+        if (Storage::disk('public')->exists($path)) {
+            return $path;
+        }
+
+        try {
+            $response = Http::timeout(15)->get($iconUrl);
+
+            if ($response->ok()) {
+                Storage::disk('public')->put($path, $response->body());
+                return $path;
+            }
+        } catch (\Throwable $e) {
+            // si falla (ej. el AccessDenied intermitente de Blizzard), se queda sin ícono por ahora
+        }
+
+        return null;
+    }
+
+    public function syncItemsBatch(
+        array $auctions,
+        int $limit = 5000,
+        ?\Illuminate\Console\Command $command = null
+    ): array {
+        // Obtener todos los IDs únicos de las auctions
+        $uniqueIds = $this->getUniqueItemIds($auctions);
+
+        // Buscar cuáles de esos IDs ya existen en la bd
+        $existingIds = Item::whereIn('blizzard_id', $uniqueIds)
+            ->pluck('blizzard_id')
+            ->all();
+
+        // Eliminar de la lista todos los IDs que ya existen
+        $missingIds = array_values(
+            array_diff($uniqueIds, $existingIds)
+        );
+
+        // Aplicar el límite del batch
+        $batch = array_slice($missingIds, 0, $limit);
+
+        // Mostrar información en consola
+        if ($command) {
+            $command->info(
+                "IDs únicos encontrados: " . count($uniqueIds)
+            );
+
+            $command->info(
+                "IDs ya existentes en BD: " . count($existingIds)
+            );
+
+            $command->info(
+                "IDs nuevos por procesar: " . count($missingIds)
+            );
+
+            $command->info(
+                "IDs que se procesarán en este batch: " . count($batch)
+            );
+
+            $command->info(
+                "IDs que quedarán pendientes: " .
+                max(0, count($missingIds) - count($batch))
+            );
+
+            $command->newLine();
+        }
+
+        // No hay nada nuevo que procesar
+        if (empty($batch)) {
+            return [
+                'processed' => 0,
+                'remaining' => 0,
+                'existing' => count($existingIds),
+                'total_unique' => count($uniqueIds),
+            ];
+        }
+
+        // Iniciar barra de progreso
+        if ($command) {
+            $command->getOutput()->progressStart(count($batch));
+        }
+
+        // Procesar en grupos de 75
+        collect($batch)
+            ->chunk(75)
+            ->each(function ($chunk) use ($command) {
+
+                // Obtener información de los items desde Blizzard
+                $items = $this->getItemsBulk(
+                    $chunk->all()
+                );
+
+                // Obtener información de los iconos
+                $mediaMap = $this->getItemMediaBulk(
+                    $chunk->all()
+                );
+
+                // Guardar items en PostgreSQL
+                foreach ($items as $item) {
+
+                    $item['icon_url'] = $this->downloadAndStoreIcon(
+                        $item['blizzard_id'],
+                        $mediaMap[$item['blizzard_id']] ?? null
+                    );
+
+                    Item::updateOrCreate(
+                        [
+                            'blizzard_id' => $item['blizzard_id']
+                        ],
+                        $item
+                    );
+
+                    // Actualizar barra de progreso
+                    if ($command) {
+                        $command->getOutput()->progressAdvance();
+                    }
+                }
+            });
+
+        // Terminar barra de progreso
+        if ($command) {
+            $command->getOutput()->progressFinish();
+            $command->newLine();
+        }
+
+        return [
+            'processed' => count($batch),
+            'remaining' => count($missingIds) - count($batch),
+            'existing' => count($existingIds),
+            'total_unique' => count($uniqueIds),
+        ];
     }
 }
