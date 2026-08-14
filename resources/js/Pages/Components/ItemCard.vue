@@ -23,7 +23,7 @@ defineProps({
 </script>
 
 <template>
-  <div class="flex w-72 items-center gap-2.5 rounded-lg border border-white/10 bg-[#141224] px-2.5 py-2
+  <div class="flex w-full items-center gap-2.5 rounded-lg border border-white/10 bg-[#141224] px-2.5 py-2
            transition-colors hover:cursor-pointer hover:border-white/20">
 
     <div class="flex size-9 shrink-0 items-center justify-center rounded-md border"
