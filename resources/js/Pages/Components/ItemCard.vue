@@ -12,7 +12,8 @@ const QUALITY_STYLES = {
 
 defineProps({
   name: String,
-  icon: { type: [Object, Function], default: () => Sparkles },
+  subtitle: String,
+  icon: { type: [Object, Function, String], default: () => Sparkles }, // ahora puede ser string (URL)
   quality: { type: String, default: 'common' },
   gold: Number,
   silver: Number,
@@ -25,10 +26,10 @@ defineProps({
 <template>
   <div class="flex w-full items-center gap-2.5 rounded-lg border border-white/10 bg-[#141224] px-2.5 py-2
            transition-colors hover:cursor-pointer hover:border-white/20">
-
-    <div class="flex size-9 shrink-0 items-center justify-center rounded-md border"
+    <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border"
       :class="[QUALITY_STYLES[quality].border, QUALITY_STYLES[quality].bg]">
-      <component :is="icon" class="size-4" :class="QUALITY_STYLES[quality].text" />
+      <img v-if="typeof icon === 'string' && icon" :src="icon" class="size-full object-cover" />
+      <component v-else :is="icon || Sparkles" class="size-4" :class="QUALITY_STYLES[quality].text" />
     </div>
 
     <div class="min-w-0 flex-1">

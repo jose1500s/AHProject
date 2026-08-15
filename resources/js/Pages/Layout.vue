@@ -1,37 +1,35 @@
-<!-- Pages/Layout.vue -->
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { router } from '@inertiajs/vue3'
 import { Loader2 } from '@lucide/vue'
 import InputText from './Components/InputText.vue';
 import CustomSelect from './Components/CustomSelect.vue';
 import TimeAgoBadge from './Components/TimeAgoBadge.vue';
 import RefreshButton from './Components/RefreshButton.vue';
-import { usePersistedRef } from '../Composables/usePersistedRef.js'
+import { useRealmSelection } from '../Composables/useRealmSelection.js'
 
 const props = defineProps({
-    realms: Array
+  realms: Array,
+  lastSyncedAt: String,
 })
 
-const region = ref('US')
-const DEFAULT_REALM = 'Illidan'
-const fallbackRealm = props.realms.find(r => r.name === DEFAULT_REALM)?.name ?? props.realms[0]?.name ?? ''
+const timeAgoLabel = computed(() => {
+  if (!props.lastSyncedAt) return '—'
+  const diffMinutes = Math.floor((Date.now() - new Date(props.lastSyncedAt)) / 60000)
+  if (diffMinutes < 1) return 'now'
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+  return `${Math.floor(diffMinutes / 60)}h ago`
+})
 
-const realm = usePersistedRef('preferred_realm', fallbackRealm)
+const { region, realm, realmSlug } = useRealmSelection(props.realms)
 
-if (!props.realms.some(r => r.name === realm.value)) {
-  realm.value = fallbackRealm
-}
-
-// slug del realm actualmente seleccionado, lo necesita el backend para pedir el connected realm
-const realmSlug = computed(() => props.realms.find(r => r.name === realm.value)?.slug)
-
+const search = ref('')
 const isLoadingAuctions = ref(false)
 
 function fetchAuctions() {
   if (!realmSlug.value) return
 
-  router.get(window.location.pathname, { realm: realmSlug.value }, {
+  router.get(window.location.pathname, { realm: realmSlug.value, search: search.value || undefined }, {
     only: ['auctions'],
     preserveState: true,
     preserveScroll: true,
@@ -42,6 +40,12 @@ function fetchAuctions() {
 
 watch(realmSlug, fetchAuctions)
 
+let searchTimeout = null
+watch(search, () => {
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(fetchAuctions, 400)
+})
+
 onMounted(fetchAuctions)
 
 function onRefresh() {
@@ -50,10 +54,8 @@ function onRefresh() {
 </script>
 
 <template>
-  <div
-    v-if="isLoadingAuctions"
-    class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#0b0d1f]/80 backdrop-blur-sm"
-  >
+  <div v-if="isLoadingAuctions"
+    class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#0b0d1f]/80 backdrop-blur-sm">
     <Loader2 class="size-8 animate-spin text-indigo-400" />
     <p class="text-sm text-slate-400">Descargando datos del Auction House...</p>
   </div>
@@ -66,7 +68,7 @@ function onRefresh() {
         </div>
       </div>
       <div class="w-1/2 h-full flex items-center">
-        <InputText type="text" placeholder="Buscar por objeto..." width="75%" />
+        <InputText v-model="search" type="text" placeholder="Buscar por objeto..." width="75%" />
       </div>
       <div class="w-[30%] h-full flex items-center">
         <div class="flex gap-3">
@@ -74,7 +76,7 @@ function onRefresh() {
           <CustomSelect v-model="realm" :options="realms.map(r => r.name)" label="Realm" />
         </div>
         <div class="flex items-center gap-3 mt-5 ml-4">
-          <TimeAgoBadge label="1h ago" />
+          <TimeAgoBadge :label="timeAgoLabel" />
           <RefreshButton @click="onRefresh" />
         </div>
       </div>
@@ -85,6 +87,6 @@ function onRefresh() {
 
 <style scoped>
 #navbar {
-    border-bottom: 0.5px solid #f8fafc48;
+  border-bottom: 0.5px solid #f8fafc48;
 }
 </style>
