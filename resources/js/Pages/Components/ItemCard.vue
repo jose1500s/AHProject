@@ -1,10 +1,20 @@
 <script setup>
-import { Sparkles, ChevronRight, ListOrdered } from '@lucide/vue'
+import { Sparkles, ListOrdered } from '@lucide/vue'
+
+const QUALITY_STYLES = {
+  poor: { text: 'text-slate-400', border: 'border-slate-400/30', bg: 'bg-slate-400/10' },
+  common: { text: 'text-slate-100', border: 'border-white/10', bg: 'bg-white/5' },
+  uncommon: { text: 'text-emerald-400', border: 'border-emerald-400/30', bg: 'bg-emerald-500/10' },
+  rare: { text: 'text-sky-400', border: 'border-sky-400/30', bg: 'bg-sky-500/10' },
+  epic: { text: 'text-purple-400', border: 'border-purple-400/30', bg: 'bg-purple-500/10' },
+  legendary: { text: 'text-orange-400', border: 'border-orange-400/30', bg: 'bg-orange-500/10' },
+}
 
 defineProps({
   name: String,
   subtitle: String,
-  icon: { type: Object, default: () => Sparkles },
+  icon: { type: [Object, Function, String], default: () => Sparkles }, // ahora puede ser string (URL)
+  quality: { type: String, default: 'common' },
   gold: Number,
   silver: Number,
   copper: Number,
@@ -14,49 +24,37 @@ defineProps({
 </script>
 
 <template>
-  <div class="w-72 rounded-2xl border border-white/10 bg-[#141224] p-4
-              shadow-[0_0_20px_-8px_rgba(168,85,247,0.25)] hover:cursor-pointer">
-
-    <div class="flex items-start gap-3">
-      <div class="flex size-11 shrink-0 items-center justify-center rounded-xl
-                  border border-purple-400/30 bg-purple-500/10">
-        <component :is="icon" class="size-5 text-purple-400" />
-      </div>
-
-      <div class="min-w-0 flex-1">
-        <h3 class="truncate text-sm font-bold text-purple-300">{{ name }}</h3>
-        <p class="text-xs text-slate-500">{{ subtitle }}</p>
-      </div>
-
-      <ChevronRight class="mt-1 size-4 shrink-0 text-slate-600" />
+  <div class="flex w-full items-center gap-2.5 rounded-lg border border-white/10 bg-[#141224] px-2.5 py-2
+           transition-colors hover:cursor-pointer hover:border-white/20">
+    <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border"
+      :class="[QUALITY_STYLES[quality].border, QUALITY_STYLES[quality].bg]">
+      <img v-if="typeof icon === 'string' && icon" :src="icon" class="size-full object-cover" />
+      <component v-else :is="icon || Sparkles" class="size-4" :class="QUALITY_STYLES[quality].text" />
     </div>
 
-    <div class="my-3 border-t border-white/5"></div>
-
-    <div>
-      <p class="text-[10px] font-semibold tracking-widest text-slate-500 uppercase">Market Price</p>
-      <div class="mt-1.5 flex items-center gap-4">
-        <div class="flex items-center gap-1.5">
-          <span class="size-2.5 rounded-full bg-amber-400"></span>
-          <span class="text-lg font-bold text-slate-100">{{ gold }}</span>
-        </div>
-        <div v-if="silver !== undefined" class="flex items-center gap-1.5">
-          <span class="size-2.5 rounded-full bg-slate-300"></span>
-          <span class="text-lg font-bold text-slate-100">{{ silver }}</span>
-        </div>
-        <div v-if="copper !== undefined" class="flex items-center gap-1.5">
-          <span class="size-2.5 rounded-full bg-orange-700"></span>
-          <span class="text-lg font-bold text-slate-100">{{ copper }}</span>
-        </div>
+    <div class="min-w-0 flex-1">
+      <h3 class="truncate text-sm font-semibold" :class="QUALITY_STYLES[quality].text">
+        {{ name }}
+      </h3>
+      <div class="flex items-center gap-1 text-[11px] text-slate-500">
+        <ListOrdered class="size-3" />
+        <span>{{ listings }} · Vol {{ volume?.toLocaleString('en-US') }}</span>
       </div>
     </div>
 
-    <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
-      <div class="flex items-center gap-1">
-        <ListOrdered class="size-3.5" />
-        <span>{{ listings }} listings</span>
+    <div class="flex shrink-0 items-center gap-1">
+      <div v-if="gold !== undefined" class="flex items-center gap-1">
+        <span class="size-2 rounded-full bg-amber-400"></span>
+        <span class="text-sm font-bold text-slate-100">{{ gold }}</span>
       </div>
-      <span>Vol {{ volume?.toLocaleString() }}</span>
+      <div v-if="silver !== undefined" class="flex items-center gap-1">
+        <span class="size-2 rounded-full bg-slate-300"></span>
+        <span class="text-sm font-bold text-slate-100">{{ silver }}</span>
+      </div>
+      <div v-if="copper !== undefined" class="flex items-center gap-1">
+        <span class="size-2 rounded-full bg-orange-700"></span>
+        <span class="text-sm font-bold text-slate-100">{{ copper }}</span>
+      </div>
     </div>
   </div>
 </template>

@@ -1,22 +1,21 @@
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 
 export function usePersistedRef(key, defaultValue) {
-    let initial = defaultValue
+    const state = ref(defaultValue) // inicia igual en servidor y cliente, sin mismatch
 
-    try {
-        const stored = localStorage.getItem(key)
-        if (stored !== null) initial = stored
-    } catch {
-        console.log("localStorage bloqueado (modo privado, cuota llena, etc.)")
-    }
-
-    const state = ref(initial)
+    onMounted(() => {
+        try {
+            const stored = localStorage.getItem(key)
+            if (stored !== null) state.value = stored
+        } catch {
+            // localStorage bloqueado, se queda con el default
+        }
+    })
 
     watch(state, (value) => {
         try {
             localStorage.setItem(key, value)
-        } catch {
-        }
+        } catch { }
     })
 
     return state
