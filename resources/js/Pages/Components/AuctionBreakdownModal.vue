@@ -105,7 +105,7 @@ const QUALITY_COLORS = {
             </button>
 
             <!-- desplegado: todas las auctions de este ilvl, ordenadas de más barata a más cara -->
-            <div v-if="expandedIlvl === group.item_level" class="bg-white/[0.02] px-5 py-2">
+            <div v-if="expandedIlvl === group.item_level" class="bg-white/2 px-5 py-2">
               <div v-for="(row, i) in group.rows" :key="i" class="flex items-center justify-between py-1.5 text-xs">
                 <span class="inline-flex items-center gap-1">
                   <span v-if="row.gold" class="inline-flex items-center gap-0.5 text-amber-400">

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
-import { router } from '@inertiajs/vue3'
+import { router, Link } from '@inertiajs/vue3'
 import { Loader2 } from '@lucide/vue'
 import InputText from './Components/InputText.vue';
 import CustomSelect from './Components/CustomSelect.vue';
@@ -70,6 +70,9 @@ function onRefresh() {
       <div class="w-1/2 h-full flex items-center">
         <InputText v-model="search" type="text" placeholder="Buscar por objeto..." width="75%" />
       </div>
+      <div>
+          <Link href="/compare" class="text-sm text-slate-400 hover:text-white">Compare</Link>
+        </div>
       <div class="w-[30%] h-full flex items-center">
         <div class="flex gap-3">
           <CustomSelect v-model="region" :options="['US']" label="Region" />

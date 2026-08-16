@@ -5,6 +5,7 @@ import ItemCard from './Components/ItemCard.vue';
 import CategoryFilter from './Components/CategoryFilter.vue';
 import Pagination from './Components/Pagination.vue';
 import AuctionBreakdownModal from './Components/AuctionBreakdownModal.vue';
+import RealmComparisonSection from './Components/RealmComparisonSection.vue';
 import { useRealmSelection } from '../Composables/useRealmSelection.js'
 
 const props = defineProps({
@@ -42,6 +43,8 @@ onMounted(() => { mounted.value = true })
             </div>
 
             <Pagination :links="auctions.links" />
+
+            <RealmComparisonSection :realms="realms" />
         </main>
 
         <AuctionBreakdownModal

@@ -60,9 +60,6 @@ class BlizzApiService
                     'namespace' => "dynamic-{$this->region}",
                     'locale' => 'en_US',
                 ]);
-
-            // el connected realm no viene como ID directo, viene embebido en una URL:
-            // "https://us.api.blizzard.com/data/wow/connected-realm/11/..." -> extraemos el 11
             $href = $response->json('connected_realm.href');
             preg_match('/connected-realm\/(\d+)/', $href, $matches);
 
@@ -137,7 +134,7 @@ class BlizzApiService
                 'item_subclass' => $r->json('item_subclass.name'),          // "Miscellaneous"
                 'inventory_type' => $r->json('inventory_type.name'),        // "Shirt"
                 'level' => $r->json('level'),
-                'icon_url' => null, // lo llenamos aparte con el endpoint de media
+                'icon_url' => null,
             ])
             ->values()->all();
     }
@@ -315,7 +312,7 @@ class BlizzApiService
         ];
     }
 
-    public function syncAuctionsToDb(string $realmSlug): array
+    public function syncAuctionsToDb(string $realmSlug, bool $force = false): array
     {
         $connectedRealmId = $this->getConnectedRealmId($realmSlug);
         $lastModifiedKey = "auctions_last_modified:{$connectedRealmId}";
@@ -324,7 +321,7 @@ class BlizzApiService
 
         $request = Http::withToken($this->getAccessToken())->timeout(60);
 
-        if ($lastModified = Cache::get($lastModifiedKey)) {
+        if (!$force && ($lastModified = Cache::get($lastModifiedKey))) {
             $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
         }
 
@@ -381,7 +378,6 @@ class BlizzApiService
 
         return ['updated' => true, 'connected_realm_id' => $connectedRealmId, 'count' => $totalAuctions];
     }
-
     public static function extractScalingModifiers(array $modifiers): array
     {
         $playerLevel = 0;
@@ -506,4 +502,106 @@ class BlizzApiService
         return Cache::get("auctions_last_modified:{$connectedRealmId}");
     }
 
+    public function getRealmPriceComparison(array $itemsWithIlvl, array $realmSlugs, bool $force = false): array
+    {
+        $realmMeta = collect($realmSlugs)->mapWithKeys(function ($slug) use ($force) {
+            $this->syncAuctionsToDb($slug, $force);
+            return [$slug => $this->getConnectedRealmId($slug)];
+        });
+
+        $lastSynced = $realmMeta->mapWithKeys(fn($connectedRealmId, $slug) => [
+            $slug => $this->getLastSyncedAt($connectedRealmId),
+        ]);
+
+        $itemIds = collect($itemsWithIlvl)->pluck('item_id')->unique()->values();
+        $itemsModel = Item::whereIn('blizzard_id', $itemIds)->get()->keyBy('blizzard_id');
+
+        $rows = collect($itemsWithIlvl)->map(function ($entry) use ($realmMeta, $itemsModel) {
+            $itemId = (int) $entry['item_id'];
+            $targetIlvl = $entry['ilvl'] !== null ? (int) $entry['ilvl'] : null;
+            $item = $itemsModel[$itemId] ?? null;
+            $lookups = ItemLevelLookup::where('item_id', $itemId)->pluck('raw_ilvl', 'bonus_signature');
+
+            $pricesByRealm = $realmMeta->mapWithKeys(function ($connectedRealmId, $slug) use ($itemId, $targetIlvl, $lookups) {
+                $auctions = DB::table('auctions')
+                    ->select(
+                        DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                        DB::raw('bonus_lists::text as bonus_signature_raw'),
+                        DB::raw('modifiers::text as modifiers_raw')
+                    )
+                    ->where('connected_realm_id', $connectedRealmId)
+                    ->where('item_id', $itemId)
+                    ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+                    ->get()
+                    ->map(function ($row) use ($lookups) {
+                        $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+                        sort($bonusIds);
+                        $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+                        [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+                        $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+                        return ['ilvl' => $lookups[$signature] ?? null, 'price_copper' => (int) $row->price_copper];
+                    });
+
+                $matching = $targetIlvl === null ? $auctions : $auctions->filter(fn($r) => $r['ilvl'] === $targetIlvl);
+                $matching = $matching->sortBy('price_copper')->values();
+
+                if ($matching->isEmpty())
+                    return [$slug => null];
+
+                return [$slug => $matching->map(fn($r) => self::copperToGsc($r['price_copper']))->all()];
+            });
+
+            return [
+                'item_id' => $itemId,
+                'ilvl' => $targetIlvl,
+                'name' => $item->name ?? 'Desconocido',
+                'quality' => $item->quality ?? 'common',
+                'icon_url' => $item?->icon_url,
+                'prices' => $pricesByRealm,
+            ];
+        })->values()->all();
+
+        return [
+            'items' => $rows,
+            'last_synced' => $lastSynced,
+        ];
+    }
+
+    public function getItemIlvlVariants(int $itemId): array
+    {
+        $rows = DB::table('auctions')
+            ->select(
+                DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                DB::raw('bonus_lists::text as bonus_signature_raw'),
+                DB::raw('modifiers::text as modifiers_raw')
+            )
+            ->where('item_id', $itemId)
+            ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+            ->get();
+
+        $lookups = ItemLevelLookup::where('item_id', $itemId)->pluck('raw_ilvl', 'bonus_signature');
+
+        $flat = $rows->map(function ($row) use ($lookups) {
+            $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+            sort($bonusIds);
+            $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+            [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+            $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+            return [
+                'ilvl' => $lookups[$signature] ?? null,
+                'price_copper' => (int) $row->price_copper,
+            ];
+        });
+
+        return $flat->groupBy('ilvl')
+            ->map(fn($group, $ilvl) => [
+                'ilvl' => $ilvl === '' ? null : (int) $ilvl,
+                'cheapest' => self::copperToGsc($group->min('price_copper')),
+                'auction_count' => $group->count(),
+            ])
+            ->sortByDesc(fn($v) => $v['ilvl'] ?? -1) // los "sin ilvl" quedan al final
+            ->values()->all();
+    }
 }

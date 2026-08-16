@@ -1,9 +1,8 @@
 import { ref, computed, watch, onMounted } from 'vue'
 
-// declarados FUERA de la función = una sola instancia compartida por toda la app
 const region = ref('US')
 const realm = ref('')
-let hydrated = false
+let hydrationRegistered = false // se registra UNA sola vez, sin importar cuántos componentes llamen a esto
 
 export function useRealmSelection(realms) {
   if (!realm.value && realms?.length) {
@@ -11,17 +10,17 @@ export function useRealmSelection(realms) {
     realm.value = realms.find(r => r.name === DEFAULT_REALM)?.name ?? realms[0]?.name ?? ''
   }
 
-  onMounted(() => {
-    if (hydrated) return
-    hydrated = true
-
-    try {
-      const stored = localStorage.getItem('preferred_realm')
-      if (stored && realms?.some(r => r.name === stored)) {
-        realm.value = stored
-      }
-    } catch {}
-  })
+  if (!hydrationRegistered) {
+    hydrationRegistered = true
+    onMounted(() => {
+      try {
+        const stored = localStorage.getItem('preferred_realm')
+        if (stored && realms?.some(r => r.name === stored)) {
+          realm.value = stored
+        }
+      } catch {}
+    })
+  }
 
   watch(realm, (value) => {
     try { localStorage.setItem('preferred_realm', value) } catch {}
