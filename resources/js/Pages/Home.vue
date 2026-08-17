@@ -19,23 +19,27 @@ const { realmSlug } = useRealmSelection(props.realms)
 const selectedItemId = ref(null)
 const selectedItemIlvl = ref(null)
 const hasIlvlFilter = ref(false)
+const compareRealms = ref([])
 
 function openFromCard(id) {
     selectedItemId.value = id
     hasIlvlFilter.value = false
     selectedItemIlvl.value = null
+    compareRealms.value = []
 }
 
-function openFromComparison({ itemId, ilvl }) {
+function openFromComparison({ itemId, ilvl, realms }) {
     selectedItemId.value = itemId
     selectedItemIlvl.value = ilvl
     hasIlvlFilter.value = true
+    compareRealms.value = realms
 }
 
 function closeModal() {
     selectedItemId.value = null
     selectedItemIlvl.value = null
     hasIlvlFilter.value = false
+    compareRealms.value = []
 }
 
 const mounted = ref(false)
@@ -58,7 +62,14 @@ onMounted(() => { mounted.value = true })
             <RealmComparisonSection :realms="realms" @select-item="openFromComparison" />
         </main>
 
-        <AuctionBreakdownModal v-if="mounted" :item-id="selectedItemId" :realm-slug="realmSlug"
-            :filter-ilvl="selectedItemIlvl" :has-ilvl-filter="hasIlvlFilter" @close="closeModal" />
+        <AuctionBreakdownModal
+            v-if="mounted"
+            :item-id="selectedItemId"
+            :realm-slug="realmSlug"
+            :filter-ilvl="selectedItemIlvl"
+            :has-ilvl-filter="hasIlvlFilter"
+            :compare-realms="compareRealms"
+            @close="closeModal"
+        />
     </Layout>
 </template>

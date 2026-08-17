@@ -8,6 +8,7 @@ use App\Http\Controllers\RealmComparisonController;
 
 Route::get('/', [Main::class, 'Home']);
 Route::get('/items/{itemId}/auctions', [ItemAuctionsController::class, 'show']);
+Route::get('/items/{itemId}/price-history', [ItemAuctionsController::class, 'priceHistory']);
 Route::get('/api/realm-comparison', [RealmComparisonController::class, 'compare']);
 Route::get('/api/items/search', [ItemSearchController::class, 'search']);
 Route::get('/api/items/{itemId}/variants', [ItemAuctionsController::class, 'variants']);

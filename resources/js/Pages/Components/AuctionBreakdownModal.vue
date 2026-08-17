@@ -1,12 +1,14 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { X, ChevronDown } from '@lucide/vue'
+import PriceHistoryChart from './PriceHistoryChart.vue'
 
 const props = defineProps({
   itemId: { type: Number, default: null },
   realmSlug: String,
   filterIlvl: { type: Number, default: null },
   hasIlvlFilter: { type: Boolean, default: false },
+  compareRealms: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['close'])
 
@@ -40,6 +42,11 @@ const displayGroups = computed(() => {
   return groups.value.filter(g => g.item_level === props.filterIlvl)
 })
 
+const chartRealms = computed(() => {
+  if (props.hasIlvlFilter && props.compareRealms.length) return props.compareRealms
+  return [{ slug: props.realmSlug, name: realmName.value || props.realmSlug }]
+})
+
 function toggleGroup(ilvl) {
   expandedIlvl.value = expandedIlvl.value === ilvl ? null : ilvl
 }
@@ -62,8 +69,7 @@ const QUALITY_COLORS = {
 
     <Transition name="slide">
       <aside v-if="itemId"
-        class="fixed right-0 top-0 z-50 flex h-screen w-full max-w-md flex-col border-l border-white/10 bg-[#141224]">
-        <!-- header -->
+        class="fixed right-0 top-0 z-50 flex h-screen w-full max-w-xl flex-col border-l border-white/10 bg-[#141224]">
         <div class="flex items-center gap-3 border-b border-white/5 px-5 py-4 shrink-0">
           <img v-if="item?.icon_url" :src="item.icon_url" class="size-9 rounded-md shrink-0" />
           <div class="min-w-0 flex-1">
@@ -82,14 +88,12 @@ const QUALITY_COLORS = {
           </button>
         </div>
 
-        <!-- lista agrupada -->
         <div class="flex-1 overflow-y-auto">
           <div v-if="loading" class="px-5 py-6 text-center text-sm text-slate-500">Cargando...</div>
           <div v-else-if="!displayGroups.length" class="px-5 py-6 text-center text-sm text-slate-500">Sin subastas activas
           </div>
 
           <div v-for="group in displayGroups" :key="group.item_level ?? 'sin-nivel'" class="border-b border-white/5">
-            <!-- fila colapsada: ilvl + precio más barato + total -->
             <button type="button" @click="toggleGroup(group.item_level)"
               class="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-white/5">
               <div class="flex items-center gap-3">
@@ -116,7 +120,6 @@ const QUALITY_COLORS = {
               </div>
             </button>
 
-            <!-- desplegado: todas las auctions de este ilvl, ordenadas de más barata a más cara -->
             <div v-if="expandedIlvl === group.item_level" class="bg-white/2 px-5 py-2">
               <div v-for="(row, i) in group.rows" :key="i" class="flex items-center justify-between py-1.5 text-xs">
                 <span class="inline-flex items-center gap-1">
@@ -134,6 +137,13 @@ const QUALITY_COLORS = {
               </div>
             </div>
           </div>
+
+          <PriceHistoryChart
+            v-if="itemId"
+            :item-id="itemId"
+            :ilvl="hasIlvlFilter ? filterIlvl : null"
+            :realms="chartRealms"
+          />
         </div>
       </aside>
     </Transition>
