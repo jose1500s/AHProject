@@ -418,24 +418,59 @@ class BlizzApiService
 
     protected function savePriceHistorySnapshot(int $connectedRealmId): void
     {
-        $snapshot = DB::table('auctions')
+        $rows = DB::table('auctions')
             ->select(
                 'item_id',
-                DB::raw('MIN(COALESCE(buyout, unit_price)) as min_price_copper'),
-                DB::raw('COUNT(*) as listings'),
-                DB::raw('SUM(quantity) as volume')
+                DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                DB::raw('bonus_lists::text as bonus_signature_raw'),
+                DB::raw('modifiers::text as modifiers_raw'),
+                'quantity'
             )
             ->where('connected_realm_id', $connectedRealmId)
-            ->groupBy('item_id')
+            ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        $lookups = ItemLevelLookup::whereIn('item_id', $rows->pluck('item_id')->unique())
             ->get()
-            ->map(fn($row) => [
-                'connected_realm_id' => $connectedRealmId,
-                'item_id' => $row->item_id,
-                'min_price_copper' => $row->min_price_copper,
-                'listings' => $row->listings,
-                'volume' => $row->volume,
-                'snapshot_at' => now(),
-            ]);
+            ->groupBy('item_id')
+            ->map(fn($group) => $group->pluck('raw_ilvl', 'bonus_signature'));
+
+        $now = now();
+
+        $snapshot = $rows
+            ->map(function ($row) use ($lookups) {
+                $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+                sort($bonusIds);
+                $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+                [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+                $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+                return [
+                    'item_id' => $row->item_id,
+                    'ilvl' => $lookups[$row->item_id][$signature] ?? null,
+                    'price_copper' => (int) $row->price_copper,
+                    'quantity' => $row->quantity,
+                ];
+            })
+            ->groupBy(fn($r) => $r['item_id'] . '::' . ($r['ilvl'] ?? 'null'))
+            ->map(function ($group) use ($connectedRealmId, $now) {
+                $first = $group->first();
+
+                return [
+                    'connected_realm_id' => $connectedRealmId,
+                    'item_id' => $first['item_id'],
+                    'ilvl' => $first['ilvl'],
+                    'min_price_copper' => $group->min('price_copper'),
+                    'listings' => $group->count(),
+                    'volume' => $group->sum('quantity'),
+                    'snapshot_at' => $now,
+                ];
+            })
+            ->values();
 
         $snapshot->chunk(1000)->each(fn($chunk) => PriceHistory::insert($chunk->all()));
     }
