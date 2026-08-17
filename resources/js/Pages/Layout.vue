@@ -21,7 +21,7 @@ const timeAgoLabel = computed(() => {
   return `${Math.floor(diffMinutes / 60)}h ago`
 })
 
-const { region, realm, realmSlug } = useRealmSelection(props.realms)
+const { region, realm, realmSlug, hydrateFromStorage } = useRealmSelection(props.realms)
 
 const search = ref('')
 const isLoadingAuctions = ref(false)
@@ -38,15 +38,17 @@ function fetchAuctions() {
   })
 }
 
-watch(realmSlug, fetchAuctions)
-
 let searchTimeout = null
 watch(search, () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(fetchAuctions, 400)
 })
 
-onMounted(fetchAuctions)
+onMounted(() => {
+  hydrateFromStorage()
+  fetchAuctions()
+  watch(realmSlug, fetchAuctions)
+})
 
 function onRefresh() {
   fetchAuctions()
@@ -70,9 +72,6 @@ function onRefresh() {
       <div class="w-1/2 h-full flex items-center">
         <InputText v-model="search" type="text" placeholder="Buscar por objeto..." width="75%" />
       </div>
-      <div>
-          <Link href="/compare" class="text-sm text-slate-400 hover:text-white">Compare</Link>
-        </div>
       <div class="w-[30%] h-full flex items-center">
         <div class="flex gap-3">
           <CustomSelect v-model="region" :options="['US']" label="Region" />

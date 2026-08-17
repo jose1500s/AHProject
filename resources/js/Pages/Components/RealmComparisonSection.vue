@@ -1,6 +1,6 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
-import { GitCompare, Sparkles, X } from '@lucide/vue'
+import { ref, watch, onMounted, computed } from 'vue'
+import { GitCompare, Sparkles, X, Star, Search } from '@lucide/vue'
 import ItemPicker from './ItemPicker.vue'
 import RealmMultiSelect from './RealmMultiSelect.vue'
 import RefreshButton from './RefreshButton.vue'
@@ -11,6 +11,7 @@ const props = defineProps({
 })
 
 const STORAGE_KEY = 'compare_items'
+const FAVORITES_KEY = 'compare_favorites'
 
 const selectedItems = ref([])
 const selectedRealms = ref([])
@@ -19,6 +20,8 @@ const lastSynced = ref({})
 const loading = ref(false)
 const openCells = ref(new Set())
 const userTouchedRealms = ref(false)
+const favorites = ref(new Set())
+const tableSearch = ref('')
 
 const { realm } = useRealmSelection(props.realms)
 
@@ -38,10 +41,19 @@ onMounted(() => {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) selectedItems.value = JSON.parse(stored)
     } catch { }
+
+    try {
+        const storedFavorites = localStorage.getItem(FAVORITES_KEY)
+        if (storedFavorites) favorites.value = new Set(JSON.parse(storedFavorites))
+    } catch { }
 })
 
 watch(selectedItems, (val) => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(val)) } catch { }
+}, { deep: true })
+
+watch(favorites, (val) => {
+    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...val])) } catch { }
 }, { deep: true })
 
 let debounceTimeout = null
@@ -87,6 +99,39 @@ function toggleCell(key) {
     openCells.value = next
 }
 
+function favoriteKey(row) {
+    return `${row.item_id}-${row.ilvl}`
+}
+
+function toggleFavorite(row) {
+    const key = favoriteKey(row)
+    const next = new Set(favorites.value)
+    next.has(key) ? next.delete(key) : next.add(key)
+    favorites.value = next
+}
+
+const sortedRows = computed(() => {
+    return [...rows.value].sort((a, b) => {
+        const aFav = favorites.value.has(favoriteKey(a))
+        const bFav = favorites.value.has(favoriteKey(b))
+        if (aFav === bFav) return 0
+        return aFav ? -1 : 1
+    })
+})
+
+function normalizeText(str) {
+    return String(str ?? '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // quita los acentos/diacríticos
+}
+
+const filteredRows = computed(() => {
+    const q = normalizeText(tableSearch.value.trim())
+    if (!q) return sortedRows.value
+    return sortedRows.value.filter(row => normalizeText(row?.name).includes(q))
+})
+
 function timeAgo(dateStr) {
     if (!dateStr) return '—'
     const diffMinutes = Math.floor((Date.now() - new Date(dateStr)) / 60000)
@@ -102,7 +147,7 @@ const QUALITY_COLORS = {
 </script>
 
 <template>
-    <section class="rounded-2xl border border-white/10 bg-[#12142b] p-5 w-full mb-20">
+    <section class="rounded-2xl border border-white/10 bg-[#12142b] p-5 w-full">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="flex items-center gap-2 text-sm font-bold text-slate-100">
                 <GitCompare class="size-4 text-indigo-400" />
@@ -116,8 +161,16 @@ const QUALITY_COLORS = {
             <RealmMultiSelect :model-value="selectedRealms" @update:model-value="onRealmsChange" :realms="realms" />
         </div>
 
+        <div v-if="selectedItems.length && selectedRealms.length" class="mt-4 flex justify-center">
+            <div class="relative w-1/3">
+                <Search class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
+                <input v-model="tableSearch" type="text" placeholder="Buscar en la tabla..."
+                    class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-md text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60 focus:bg-white/10 text-center" />
+            </div>
+        </div>
+
         <div v-if="selectedItems.length && selectedRealms.length"
-            class="mt-6 overflow-x-auto rounded-xl border border-white/5">
+            class="mt-3 overflow-x-auto rounded-xl border border-white/5">
             <table class="w-full text-sm">
                 <thead class="bg-white/[0.02] text-[11px] uppercase tracking-wider text-slate-500">
                     <tr>
@@ -137,15 +190,25 @@ const QUALITY_COLORS = {
                         <td :colspan="selectedRealms.length + 1" class="px-4 py-6 text-center text-slate-500">
                             Cargando...</td>
                     </tr>
-                    <tr v-for="row in rows" :key="`${row.item_id}-${row.ilvl}`"
-                        class="border-t border-white/5 align-top">
+                    <tr v-else-if="!filteredRows.length">
+                        <td :colspan="selectedRealms.length + 1" class="px-4 py-6 text-center text-slate-500">
+                            Sin resultados para "{{ tableSearch }}"</td>
+                    </tr>
+                    <tr v-for="row in filteredRows" :key="`${row.item_id}-${row.ilvl}`"
+                        class="border-t border-white/5 align-top"
+                        :class="favorites.has(favoriteKey(row)) ? 'bg-amber-400/[0.04]' : ''">
                         <td class="px-4 py-2.5">
                             <span class="flex items-center gap-2"
                                 :class="QUALITY_COLORS[row.quality] ?? 'text-slate-100'">
+                                <button type="button" @click="toggleFavorite(row)" class="shrink-0">
+                                    <Star class="size-4 transition-colors" :class="favorites.has(favoriteKey(row))
+                                        ? 'fill-amber-400 text-amber-400'
+                                        : 'text-slate-600 hover:text-slate-400'" />
+                                </button>
                                 <img v-if="row.icon_url" :src="row.icon_url" class="size-5 rounded" />
                                 <Sparkles v-else class="size-5" />
                                 {{ row.name }}
-                                <span class="rounded bg-white/5 px-1.5 py-0.5 text-[12px] text-slate-100 font-semibold">
+                                <span class="rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100">
                                     {{ row.ilvl !== null ? `ilvl ${row.ilvl}` : 'Sin ilvl' }}
                                 </span>
                                 <button type="button" @click="removeItem(row.item_id, row.ilvl)"

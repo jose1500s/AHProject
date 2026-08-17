@@ -1,8 +1,8 @@
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const region = ref('US')
 const realm = ref('')
-let hydrationRegistered = false // se registra UNA sola vez, sin importar cuántos componentes llamen a esto
+let storageHydrated = false
 
 export function useRealmSelection(realms) {
   if (!realm.value && realms?.length) {
@@ -10,23 +10,23 @@ export function useRealmSelection(realms) {
     realm.value = realms.find(r => r.name === DEFAULT_REALM)?.name ?? realms[0]?.name ?? ''
   }
 
-  if (!hydrationRegistered) {
-    hydrationRegistered = true
-    onMounted(() => {
-      try {
-        const stored = localStorage.getItem('preferred_realm')
-        if (stored && realms?.some(r => r.name === stored)) {
-          realm.value = stored
-        }
-      } catch {}
-    })
-  }
-
   watch(realm, (value) => {
+    if (typeof window === 'undefined') return
     try { localStorage.setItem('preferred_realm', value) } catch {}
   })
 
   const realmSlug = computed(() => realms?.find(r => r.name === realm.value)?.slug)
 
-  return { region, realm, realmSlug }
+  function hydrateFromStorage() {
+    if (storageHydrated || typeof window === 'undefined') return
+    storageHydrated = true
+    try {
+      const stored = localStorage.getItem('preferred_realm')
+      if (stored && realms?.some(r => r.name === stored)) {
+        realm.value = stored
+      }
+    } catch {}
+  }
+
+  return { region, realm, realmSlug, hydrateFromStorage }
 }

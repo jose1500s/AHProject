@@ -41,15 +41,17 @@ async function selectItem(item) {
 
 function addVariant(variant) {
     const id = activeItem.value.blizzard_id
-    if (props.modelValue.some(i => i.id === id && i.ilvl === variant.ilvl)) return
+    const alreadyAdded = props.modelValue.some(i => i.id === id && i.ilvl === variant.ilvl)
 
-    emit('update:modelValue', [...props.modelValue, {
-        id,
-        ilvl: variant.ilvl,
-        name: activeItem.value.name,
-        icon_url: activeItem.value.icon_url,
-        quality: activeItem.value.quality,
-    }])
+    if (!alreadyAdded) {
+        emit('update:modelValue', [...props.modelValue, {
+            id,
+            ilvl: variant.ilvl,
+            name: activeItem.value.name,
+            icon_url: activeItem.value.icon_url,
+            quality: activeItem.value.quality,
+        }])
+    }
 
     closeAndReset()
 }
@@ -128,7 +130,7 @@ onUnmounted(() => document.removeEventListener('mousedown', onClickOutside))
                         <li v-for="variant in variants" :key="variant.ilvl ?? 'none'" @click="addVariant(variant)"
                             class="flex cursor-pointer items-center justify-between px-4 py-2 text-sm hover:bg-white/5">
                             <span class="text-slate-200">{{ variant.ilvl !== null ? `ilvl ${variant.ilvl}` : 'Sin ilvl'
-                            }}</span>
+                                }}</span>
                             <span class="flex items-center gap-2">
                                 <span class="inline-flex items-center gap-0.5 text-amber-400 font-semibold">
                                     <span class="size-1.5 rounded-full bg-amber-400"></span>{{ variant.cheapest.gold }}
