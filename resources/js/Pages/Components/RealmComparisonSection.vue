@@ -9,6 +9,7 @@ import { useRealmSelection } from '../../Composables/useRealmSelection.js'
 const props = defineProps({
     realms: { type: Array, required: true },
 })
+const emit = defineEmits(['select-item'])
 
 const STORAGE_KEY = 'compare_items'
 const FAVORITES_KEY = 'compare_favorites'
@@ -110,6 +111,10 @@ function toggleFavorite(row) {
     favorites.value = next
 }
 
+function openItemDetail(row) {
+    emit('select-item', { itemId: row.item_id, ilvl: row.ilvl })
+}
+
 const sortedRows = computed(() => {
     return [...rows.value].sort((a, b) => {
         const aFav = favorites.value.has(favoriteKey(a))
@@ -172,7 +177,7 @@ const QUALITY_COLORS = {
         <div v-if="selectedItems.length && selectedRealms.length"
             class="mt-3 overflow-x-auto rounded-xl border border-white/5">
             <table class="w-full text-sm">
-                <thead class="bg-white/[0.02] text-[11px] uppercase tracking-wider text-slate-500">
+                <thead class="bg-white/2 text-[11px] uppercase tracking-wider text-slate-500">
                     <tr>
                         <th class="px-4 py-2.5 text-left">Item</th>
                         <th v-for="slug in selectedRealms" :key="slug" class="px-4 py-2.5 text-left">
@@ -180,7 +185,7 @@ const QUALITY_COLORS = {
                                 <span>{{realms.find(r => r.slug === slug)?.name ?? slug}}</span>
                                 <span class="text-slate-600">—</span>
                                 <span class="font-normal normal-case text-slate-500">{{ timeAgo(lastSynced[slug])
-                                }}</span>
+                                    }}</span>
                             </div>
                         </th>
                     </tr>
@@ -196,23 +201,24 @@ const QUALITY_COLORS = {
                     </tr>
                     <tr v-for="row in filteredRows" :key="`${row.item_id}-${row.ilvl}`"
                         class="border-t border-white/5 align-top"
-                        :class="favorites.has(favoriteKey(row)) ? 'bg-amber-400/[0.04]' : ''">
-                        <td class="px-4 py-2.5">
+                        :class="favorites.has(favoriteKey(row)) ? 'bg-amber-400/4' : ''">
+                        <td class="px-4 py-2.5 cursor-pointer hover:bg-white/3" @click="openItemDetail(row)">
                             <span class="flex items-center gap-2"
                                 :class="QUALITY_COLORS[row.quality] ?? 'text-slate-100'">
-                                <button type="button" @click="toggleFavorite(row)" class="shrink-0">
+                                <button type="button" @click.stop="toggleFavorite(row)" class="shrink-0">
                                     <Star class="size-4 transition-colors" :class="favorites.has(favoriteKey(row))
                                         ? 'fill-amber-400 text-amber-400'
                                         : 'text-slate-600 hover:text-slate-400'" />
                                 </button>
-                                <img v-if="row.icon_url" :src="row.icon_url" class="size-5 rounded" />
-                                <Sparkles v-else class="size-5" />
-                                {{ row.name }}
-                                <span class="rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100">
+                                <img v-if="row.icon_url" :src="row.icon_url" class="size-5 rounded shrink-0" />
+                                <Sparkles v-else class="size-5 shrink-0" />
+                                <span class="truncate">{{ row.name }}</span>
+                                <span
+                                    class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100">
                                     {{ row.ilvl !== null ? `ilvl ${row.ilvl}` : 'Sin ilvl' }}
                                 </span>
-                                <button type="button" @click="removeItem(row.item_id, row.ilvl)"
-                                    class="text-slate-500 hover:text-red-400">
+                                <button type="button" @click.stop="removeItem(row.item_id, row.ilvl)"
+                                    class="shrink-0 text-slate-500 hover:text-red-400">
                                     <X class="size-3.5" />
                                 </button>
                             </span>
