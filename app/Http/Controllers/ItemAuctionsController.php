@@ -20,10 +20,24 @@ class ItemAuctionsController extends Controller
             'item' => $item ? [
                 'name' => $item->name,
                 'quality' => $item->quality,
-                'icon_url' => $item->icon_url, // <- ya viene completo desde el accessor del modelo
+                'icon_url' => $item->icon_url,
             ] : null,
             'realm_name' => $realm['name'] ?? $realmSlug,
             'rows' => $blizzard->getItemAuctionBreakdown($connectedRealmId, $itemId),
+        ]);
+    }
+
+    public function variants(int $itemId, BlizzApiService $blizzard)
+    {
+        $item = \App\Models\Item::where('blizzard_id', $itemId)->first();
+
+        return response()->json([
+            'item' => $item ? [
+                'name' => $item->name,
+                'quality' => $item->quality,
+                'icon_url' => $item->icon_url,
+            ] : null,
+            'variants' => $blizzard->getItemIlvlVariants($itemId),
         ]);
     }
 }

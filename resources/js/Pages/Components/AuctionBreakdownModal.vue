@@ -1,10 +1,12 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { X, ChevronDown } from '@lucide/vue'
 
 const props = defineProps({
   itemId: { type: Number, default: null },
   realmSlug: String,
+  filterIlvl: { type: Number, default: null },
+  hasIlvlFilter: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close'])
 
@@ -31,6 +33,11 @@ watch(() => props.itemId, async (id) => {
   } finally {
     loading.value = false
   }
+})
+
+const displayGroups = computed(() => {
+  if (!props.hasIlvlFilter) return groups.value
+  return groups.value.filter(g => g.item_level === props.filterIlvl)
 })
 
 function toggleGroup(ilvl) {
@@ -63,7 +70,12 @@ const QUALITY_COLORS = {
             <h2 class="truncate text-sm font-bold" :class="QUALITY_COLORS[item?.quality] ?? 'text-slate-100'">
               {{ item?.name ?? 'Cargando...' }}
             </h2>
-            <p class="text-xs text-slate-500">{{ realmName }}</p>
+            <p class="text-xs text-slate-500">
+              {{ realmName }}
+              <span v-if="hasIlvlFilter" class="text-slate-600">
+                · {{ filterIlvl !== null ? `ilvl ${filterIlvl}` : 'Sin ilvl' }}
+              </span>
+            </p>
           </div>
           <button type="button" @click="emit('close')" class="shrink-0 text-slate-500 hover:text-white">
             <X class="size-4" />
@@ -73,10 +85,10 @@ const QUALITY_COLORS = {
         <!-- lista agrupada -->
         <div class="flex-1 overflow-y-auto">
           <div v-if="loading" class="px-5 py-6 text-center text-sm text-slate-500">Cargando...</div>
-          <div v-else-if="!groups.length" class="px-5 py-6 text-center text-sm text-slate-500">Sin subastas activas
+          <div v-else-if="!displayGroups.length" class="px-5 py-6 text-center text-sm text-slate-500">Sin subastas activas
           </div>
 
-          <div v-for="group in groups" :key="group.item_level ?? 'sin-nivel'" class="border-b border-white/5">
+          <div v-for="group in displayGroups" :key="group.item_level ?? 'sin-nivel'" class="border-b border-white/5">
             <!-- fila colapsada: ilvl + precio más barato + total -->
             <button type="button" @click="toggleGroup(group.item_level)"
               class="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-white/5">
@@ -105,7 +117,7 @@ const QUALITY_COLORS = {
             </button>
 
             <!-- desplegado: todas las auctions de este ilvl, ordenadas de más barata a más cara -->
-            <div v-if="expandedIlvl === group.item_level" class="bg-white/[0.02] px-5 py-2">
+            <div v-if="expandedIlvl === group.item_level" class="bg-white/2 px-5 py-2">
               <div v-for="(row, i) in group.rows" :key="i" class="flex items-center justify-between py-1.5 text-xs">
                 <span class="inline-flex items-center gap-1">
                   <span v-if="row.gold" class="inline-flex items-center gap-0.5 text-amber-400">

@@ -17,6 +17,8 @@ class BlizzApiService
     protected string $clientId;
     protected string $clientSecret;
 
+    protected array $knownMissingItemIds = [123869, 225218, 225219, 225236, 225237];
+
     public function __construct()
     {
         $this->region = config('services.blizzard.region');
@@ -43,7 +45,7 @@ class BlizzApiService
             $response = Http::withToken($this->getAccessToken())
                 ->get("https://{$this->region}.api.blizzard.com/data/wow/realm/index", [
                     'namespace' => "dynamic-{$this->region}",
-                    'locale' => 'en_US',
+                    'locale' => 'es_MX',
                 ]);
 
             return collect($response->json('realms', []))
@@ -58,11 +60,8 @@ class BlizzApiService
             $response = Http::withToken($this->getAccessToken())
                 ->get("https://{$this->region}.api.blizzard.com/data/wow/realm/{$realmSlug}", [
                     'namespace' => "dynamic-{$this->region}",
-                    'locale' => 'en_US',
+                    'locale' => 'es_MX',
                 ]);
-
-            // el connected realm no viene como ID directo, viene embebido en una URL:
-            // "https://us.api.blizzard.com/data/wow/connected-realm/11/..." -> extraemos el 11
             $href = $response->json('connected_realm.href');
             preg_match('/connected-realm\/(\d+)/', $href, $matches);
 
@@ -86,7 +85,7 @@ class BlizzApiService
 
         $response = $request->get(
             "https://{$this->region}.api.blizzard.com/data/wow/connected-realm/{$connectedRealmId}/auctions",
-            ['namespace' => "dynamic-{$this->region}", 'locale' => 'en_US']
+            ['namespace' => "dynamic-{$this->region}", 'locale' => 'es_MX']
         );
 
         if ($response->status() === 304) {
@@ -122,22 +121,22 @@ class BlizzApiService
                     ->timeout(15)
                     ->get("https://{$this->region}.api.blizzard.com/data/wow/item/{$id}", [
                         'namespace' => "static-{$this->region}",
-                        'locale' => 'en_US',
+                        'locale' => 'es_MX',
                     ])
             )->all()
         );
 
         return collect($responses)
-            ->filter(fn($r) => $r->ok())
+            ->filter(fn($r) => $r instanceof \Illuminate\Http\Client\Response && $r->ok()) // <- cambio aquí
             ->map(fn($r) => [
                 'blizzard_id' => $r->json('id'),
                 'name' => $r->json('name'),
-                'quality' => strtolower($r->json('quality.type')),          // uncommon, rare, epic...
-                'item_class' => $r->json('item_class.name'),                // "Armor"
-                'item_subclass' => $r->json('item_subclass.name'),          // "Miscellaneous"
-                'inventory_type' => $r->json('inventory_type.name'),        // "Shirt"
+                'quality' => strtolower($r->json('quality.type')),
+                'item_class' => $r->json('item_class.name'),
+                'item_subclass' => $r->json('item_subclass.name'),
+                'inventory_type' => $r->json('inventory_type.name'),
                 'level' => $r->json('level'),
-                'icon_url' => null, // lo llenamos aparte con el endpoint de media
+                'icon_url' => null,
             ])
             ->values()->all();
     }
@@ -155,13 +154,13 @@ class BlizzApiService
                     ->timeout(15)
                     ->get("https://{$this->region}.api.blizzard.com/data/wow/media/item/{$id}", [
                         'namespace' => "static-{$this->region}",
-                        'locale' => 'en_US',
+                        'locale' => 'es_MX',
                     ])
             )->all()
         );
 
         return collect($responses)
-            ->filter(fn($r) => $r->ok())
+            ->filter(fn($r) => $r instanceof \Illuminate\Http\Client\Response && $r->ok())
             ->mapWithKeys(fn($r, $id) => [
                 $id => collect($r->json('assets', []))->firstWhere('key', 'icon')['value'] ?? null,
             ])
@@ -210,6 +209,7 @@ class BlizzApiService
         $missingIds = array_values(
             array_diff($uniqueIds, $existingIds)
         );
+        $missingIds = array_values(array_diff($missingIds, $this->knownMissingItemIds));
 
         // Aplicar el límite del batch
         $batch = array_slice($missingIds, 0, $limit);
@@ -315,73 +315,92 @@ class BlizzApiService
         ];
     }
 
-    public function syncAuctionsToDb(string $realmSlug): array
+    public function syncAuctionsToDb(string $realmSlug, bool $force = false): array
     {
         $connectedRealmId = $this->getConnectedRealmId($realmSlug);
-        $lastModifiedKey = "auctions_last_modified:{$connectedRealmId}";
 
-        ini_set('memory_limit', '1024M');
+        $lock = Cache::lock("sync_lock:{$connectedRealmId}", 30);
 
-        $request = Http::withToken($this->getAccessToken())->timeout(60);
-
-        if ($lastModified = Cache::get($lastModifiedKey)) {
-            $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
+        if (!$lock->get()) {
+            $lock->block(30);
+            return ['updated' => false, 'connected_realm_id' => $connectedRealmId, 'skipped_concurrent' => true];
         }
 
-        $response = $request->get(
-            "https://{$this->region}.api.blizzard.com/data/wow/connected-realm/{$connectedRealmId}/auctions",
-            ['namespace' => "dynamic-{$this->region}", 'locale' => 'en_US']
-        );
+        try {
+            $lastModifiedKey = "auctions_last_modified:{$connectedRealmId}";
 
-        if ($response->status() === 304) {
-            return ['updated' => false, 'connected_realm_id' => $connectedRealmId];
-        }
+            ini_set('memory_limit', '1024M');
 
-        $auctions = $response->json('auctions', []);
-        $totalAuctions = count($auctions);
+            $request = Http::withToken($this->getAccessToken())->timeout(60);
 
-        DB::transaction(function () use ($connectedRealmId, &$auctions) {
-            Auction::where('connected_realm_id', $connectedRealmId)->delete();
+            if (!$force && ($lastModified = Cache::get($lastModifiedKey))) {
+                $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
+            }
 
-            $now = now();
-            $rows = [];
+            $response = $request->get(
+                "https://{$this->region}.api.blizzard.com/data/wow/connected-realm/{$connectedRealmId}/auctions",
+                ['namespace' => "dynamic-{$this->region}", 'locale' => 'es_MX']
+            );
 
-            foreach ($auctions as $a) {
-                $rows[] = [
-                    'connected_realm_id' => $connectedRealmId,
-                    'blizzard_auction_id' => $a['id'],
-                    'item_id' => $a['item']['id'],
-                    'bonus_lists' => json_encode($a['item']['bonus_lists'] ?? []),
-                    'modifiers' => json_encode($a['item']['modifiers'] ?? []),
-                    'buyout' => $a['buyout'] ?? null,
-                    'bid' => $a['bid'] ?? null,
-                    'unit_price' => $a['unit_price'] ?? null,
-                    'quantity' => $a['quantity'] ?? 1,
-                    'time_left' => $a['time_left'] ?? null,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
+            if ($response->status() === 304) {
+                return ['updated' => false, 'connected_realm_id' => $connectedRealmId];
+            }
 
-                if (count($rows) >= 1000) {
-                    Auction::insert($rows);
-                    $rows = [];
+            $auctions = $response->json('auctions', []);
+            $totalAuctions = count($auctions);
+
+            DB::transaction(function () use ($connectedRealmId, &$auctions) {
+                Auction::where('connected_realm_id', $connectedRealmId)->delete();
+
+                $now = now();
+                $rows = [];
+
+                foreach ($auctions as $a) {
+                    $rows[] = [
+                        'connected_realm_id' => $connectedRealmId,
+                        'blizzard_auction_id' => $a['id'],
+                        'item_id' => $a['item']['id'],
+                        'bonus_lists' => json_encode($a['item']['bonus_lists'] ?? []),
+                        'modifiers' => json_encode($a['item']['modifiers'] ?? []),
+                        'buyout' => $a['buyout'] ?? null,
+                        'bid' => $a['bid'] ?? null,
+                        'unit_price' => $a['unit_price'] ?? null,
+                        'quantity' => $a['quantity'] ?? 1,
+                        'time_left' => $a['time_left'] ?? null,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+
+                    if (count($rows) >= 1000) {
+                        Auction::upsert(
+                            $rows,
+                            ['connected_realm_id', 'blizzard_auction_id'],
+                            ['item_id', 'bonus_lists', 'modifiers', 'buyout', 'bid', 'unit_price', 'quantity', 'time_left', 'updated_at']
+                        );
+                        $rows = [];
+                    }
                 }
-            }
 
-            if (!empty($rows)) {
-                Auction::insert($rows);
-            }
+                if (!empty($rows)) {
+                    Auction::upsert(
+                        $rows,
+                        ['connected_realm_id', 'blizzard_auction_id'],
+                        ['item_id', 'bonus_lists', 'modifiers', 'buyout', 'bid', 'unit_price', 'quantity', 'time_left', 'updated_at']
+                    );
+                }
 
-            $auctions = null;
-        });
+                $auctions = null;
+            });
 
-        Cache::put($lastModifiedKey, $response->header('Last-Modified'), now()->addDay());
+            Cache::put($lastModifiedKey, $response->header('Last-Modified'), now()->addDay());
 
-        $this->savePriceHistorySnapshot($connectedRealmId);
+            $this->savePriceHistorySnapshot($connectedRealmId);
 
-        return ['updated' => true, 'connected_realm_id' => $connectedRealmId, 'count' => $totalAuctions];
+            return ['updated' => true, 'connected_realm_id' => $connectedRealmId, 'count' => $totalAuctions];
+        } finally {
+            $lock->release();
+        }
     }
-
     public static function extractScalingModifiers(array $modifiers): array
     {
         $playerLevel = 0;
@@ -506,4 +525,214 @@ class BlizzApiService
         return Cache::get("auctions_last_modified:{$connectedRealmId}");
     }
 
+    public function getRealmPriceComparison(array $itemsWithIlvl, array $realmSlugs, bool $force = false): array
+    {
+        $realmMeta = collect($realmSlugs)->mapWithKeys(function ($slug) use ($force) {
+            $this->syncAuctionsToDb($slug, $force);
+            return [$slug => $this->getConnectedRealmId($slug)];
+        });
+
+        $lastSynced = $realmMeta->mapWithKeys(fn($connectedRealmId, $slug) => [
+            $slug => $this->getLastSyncedAt($connectedRealmId),
+        ]);
+
+        $itemIds = collect($itemsWithIlvl)->pluck('item_id')->unique()->values();
+        $itemsModel = Item::whereIn('blizzard_id', $itemIds)->get()->keyBy('blizzard_id');
+
+        $rows = collect($itemsWithIlvl)->map(function ($entry) use ($realmMeta, $itemsModel) {
+            $itemId = (int) $entry['item_id'];
+            $targetIlvl = $entry['ilvl'] !== null ? (int) $entry['ilvl'] : null;
+            $item = $itemsModel[$itemId] ?? null;
+            $lookups = ItemLevelLookup::where('item_id', $itemId)->pluck('raw_ilvl', 'bonus_signature');
+
+            $pricesByRealm = $realmMeta->mapWithKeys(function ($connectedRealmId, $slug) use ($itemId, $targetIlvl, $lookups) {
+                $auctions = DB::table('auctions')
+                    ->select(
+                        DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                        DB::raw('bonus_lists::text as bonus_signature_raw'),
+                        DB::raw('modifiers::text as modifiers_raw')
+                    )
+                    ->where('connected_realm_id', $connectedRealmId)
+                    ->where('item_id', $itemId)
+                    ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+                    ->get()
+                    ->map(function ($row) use ($lookups) {
+                        $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+                        sort($bonusIds);
+                        $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+                        [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+                        $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+                        return ['ilvl' => $lookups[$signature] ?? null, 'price_copper' => (int) $row->price_copper];
+                    });
+
+                $matching = $targetIlvl === null ? $auctions : $auctions->filter(fn($r) => $r['ilvl'] === $targetIlvl);
+                $matching = $matching->sortBy('price_copper')->values();
+
+                if ($matching->isEmpty())
+                    return [$slug => null];
+
+                return [$slug => $matching->map(fn($r) => self::copperToGsc($r['price_copper']))->all()];
+            });
+
+            return [
+                'item_id' => $itemId,
+                'ilvl' => $targetIlvl,
+                'name' => $item->name ?? 'Desconocido',
+                'quality' => $item->quality ?? 'common',
+                'icon_url' => $item?->icon_url,
+                'prices' => $pricesByRealm,
+            ];
+        })->values()->all();
+
+        return [
+            'items' => $rows,
+            'last_synced' => $lastSynced,
+        ];
+    }
+
+    public function getItemIlvlVariants(int $itemId): array
+    {
+        $rows = DB::table('auctions')
+            ->select(
+                DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                DB::raw('bonus_lists::text as bonus_signature_raw'),
+                DB::raw('modifiers::text as modifiers_raw')
+            )
+            ->where('item_id', $itemId)
+            ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+            ->get();
+
+        $lookups = ItemLevelLookup::where('item_id', $itemId)->pluck('raw_ilvl', 'bonus_signature');
+
+        $flat = $rows->map(function ($row) use ($lookups) {
+            $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+            sort($bonusIds);
+            $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+            [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+            $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+            return [
+                'ilvl' => $lookups[$signature] ?? null,
+                'price_copper' => (int) $row->price_copper,
+            ];
+        });
+
+        return $flat->groupBy('ilvl')
+            ->map(fn($group, $ilvl) => [
+                'ilvl' => $ilvl === '' ? null : (int) $ilvl,
+                'cheapest' => self::copperToGsc($group->min('price_copper')),
+                'auction_count' => $group->count(),
+            ])
+            ->sortByDesc(fn($v) => $v['ilvl'] ?? -1) // los "sin ilvl" quedan al final
+            ->values()->all();
+    }
+
+    public function retryMissingIcons(?\Illuminate\Console\Command $command = null): array
+    {
+        $missing = Item::whereNull('icon_url')->pluck('blizzard_id');
+
+        if ($command) {
+            $command->info("Ítems sin ícono: {$missing->count()}");
+        }
+
+        if ($missing->isEmpty()) {
+            return ['processed' => 0, 'fixed' => 0, 'still_missing' => 0];
+        }
+
+        $fixed = 0;
+        $chunks = $missing->chunk(50);
+        $totalChunks = $chunks->count();
+        $chunkNumber = 0;
+
+        foreach ($chunks as $chunk) {
+            $chunkNumber++;
+            $chunkStart = microtime(true);
+
+            if ($command) {
+                $command->line("Chunk {$chunkNumber}/{$totalChunks} — pidiendo media de " . $chunk->count() . " ítems...");
+            }
+
+            $mediaMap = $this->getItemMediaBulk($chunk->all());
+
+            if ($command) {
+                $elapsed = round(microtime(true) - $chunkStart, 1);
+                $command->line("  media obtenida en {$elapsed}s (" . count($mediaMap) . " respondieron), descargando íconos en paralelo...");
+            }
+
+            $downloadStart = microtime(true);
+            $urlMap = collect($chunk)->mapWithKeys(fn($id) => [$id => $mediaMap[$id] ?? null])->all();
+            $downloadResults = $this->downloadIconsBulk($urlMap);
+
+            $chunkFixed = 0;
+            foreach ($downloadResults as $itemId => $path) {
+                if ($path) {
+                    Item::where('blizzard_id', $itemId)->update(['icon_url' => $path]);
+                    $fixed++;
+                    $chunkFixed++;
+                }
+            }
+
+            if ($command) {
+                $downloadElapsed = round(microtime(true) - $downloadStart, 1);
+                $totalElapsed = round(microtime(true) - $chunkStart, 1);
+                $command->line("  descarga: {$downloadElapsed}s — chunk {$chunkNumber} terminado en {$totalElapsed}s total. {$chunkFixed}/{$chunk->count()} corregidos. Acumulado: {$fixed}");
+            }
+        }
+
+        return [
+            'processed' => $missing->count(),
+            'fixed' => $fixed,
+            'still_missing' => $missing->count() - $fixed,
+        ];
+    }
+
+    protected function downloadIconsBulk(array $itemIdToUrl): array
+    {
+        $results = [];
+        $toDownload = [];
+
+        foreach ($itemIdToUrl as $itemId => $url) {
+            $path = "icons/{$itemId}.jpg";
+
+            if (!$url) {
+                $results[$itemId] = null;
+                continue;
+            }
+
+            if (Storage::disk('public')->exists($path)) {
+                $results[$itemId] = $path;
+                continue;
+            }
+
+            $toDownload[$itemId] = $url;
+        }
+
+        if (empty($toDownload)) {
+            return $results;
+        }
+
+        $responses = Http::pool(
+            fn($pool) =>
+            collect($toDownload)->map(
+                fn($url, $itemId) =>
+                $pool->as($itemId)->timeout(15)->get($url)
+            )->all()
+        );
+
+        foreach ($toDownload as $itemId => $url) {
+            $path = "icons/{$itemId}.jpg";
+            $response = $responses[$itemId] ?? null;
+
+
+            if ($response instanceof \Illuminate\Http\Client\Response && $response->ok()) {
+                Storage::disk('public')->put($path, $response->body());
+                $results[$itemId] = $path;
+            } else {
+                $results[$itemId] = null;
+            }
+        }
+
+        return $results;
+    }
 }
