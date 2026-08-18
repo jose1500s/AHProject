@@ -10,6 +10,7 @@ const commodities = ref({ data: [], links: [] })
 const lastSyncedAt = ref(null)
 const loading = ref(false)
 const selectedItemId = ref(null)
+const mounted = ref(false)
 
 async function fetchCommodities(url = null) {
     loading.value = true
@@ -30,7 +31,10 @@ watch(search, () => {
     searchTimeout = setTimeout(() => fetchCommodities(), 400)
 })
 
-onMounted(() => fetchCommodities())
+onMounted(() => {
+    mounted.value = true
+    fetchCommodities()
+})
 
 function timeAgo(dateStr) {
     if (!dateStr) return '—'
@@ -87,6 +91,6 @@ function closeDetail() {
             @navigate="fetchCommodities"
         />
 
-        <CommodityDetailModal :item-id="selectedItemId" @close="closeDetail" />
+        <CommodityDetailModal v-if="mounted" :item-id="selectedItemId" @close="closeDetail" />
     </div>
 </template>

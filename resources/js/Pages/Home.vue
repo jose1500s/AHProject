@@ -74,7 +74,7 @@ onMounted(() => { mounted.value = true })
                 </button>
             </div>
 
-            <template v-if="activeTab === 'auctions'">
+            <div v-show="activeTab === 'auctions'" class="flex flex-col items-center gap-5 w-full">
                 <CategoryFilter />
                 <div class="grid grid-cols-5 gap-2 w-full">
                     <ItemCard
@@ -96,11 +96,11 @@ onMounted(() => { mounted.value = true })
                 <Pagination :links="auctions.links" />
 
                 <RealmComparisonSection :realms="realms" @select-item="openFromComparison" />
-            </template>
+            </div>
 
-            <template v-else>
+            <div v-show="activeTab === 'commodities'" class="w-full">
                 <CommoditiesGrid />
-            </template>
+            </div>
         </main>
 
         <AuctionBreakdownModal
