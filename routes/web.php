@@ -6,6 +6,7 @@ use App\Http\Controllers\ItemAuctionsController;
 use App\Http\Controllers\ItemSearchController;
 use App\Http\Controllers\RealmComparisonController;
 use App\Http\Controllers\CommodityController;
+use App\Http\Controllers\WowSyncController;
 
 Route::get('/', [Main::class, 'Home']);
 Route::get('/items/{itemId}/auctions', [ItemAuctionsController::class, 'show']);
@@ -17,3 +18,4 @@ Route::get('/api/items/{itemId}/variants', [ItemAuctionsController::class, 'vari
 Route::get('/api/commodities', [CommodityController::class, 'list']);
 Route::get('/commodities/{itemId}/price-history', [CommodityController::class, 'priceHistory']);
 Route::get('/commodities/{itemId}/item-detail', [CommodityController::class, 'itemDetail']);
+Route::post('/api/wow-sync', [WowSyncController::class, 'ingest']);

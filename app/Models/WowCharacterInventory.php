@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class WowCharacterInventory extends Model
 {
+    protected $table = 'wow_character_inventory';
+
     public $timestamps = false;
 
     protected $fillable = [

@@ -1,0 +1,190 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\WowCharacter;
+use App\Models\WowWarband;
+use App\Models\WowAuctionTransaction;
+use App\Models\WowPostFee;
+use App\Models\WowActiveAuction;
+use App\Models\WowCharacterInventory;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class WowSyncController extends Controller
+{
+    public function ingest(Request $request)
+    {
+        $token = $request->bearerToken();
+
+        if (!$token || $token !== config('services.wow_tracker.token')) {
+            return response()->json(['error' => 'unauthorized'], 401);
+        }
+
+        $payload = $request->all();
+
+        $charactersIn = $payload['characters'] ?? [];
+        $warbandIn = $payload['warband'] ?? null;
+        $transactionsIn = $payload['auctionTransactions'] ?? [];
+        $feesIn = $payload['postFees'] ?? [];
+
+        $summary = [
+            'characters' => 0,
+            'transactions_new' => 0,
+            'fees_new' => 0,
+            'active_auctions' => 0,
+            'inventory_items' => 0,
+        ];
+
+        DB::transaction(function () use ($charactersIn, $warbandIn, $transactionsIn, $feesIn, &$summary) {
+            foreach ($charactersIn as $characterKey => $char) {
+                WowCharacter::updateOrCreate(
+                    ['character_key' => $characterKey],
+                    [
+                        'name' => $char['name'] ?? $characterKey,
+                        'realm' => $char['realm'] ?? '',
+                        'class' => $char['class'] ?? null,
+                        'level' => $char['level'] ?? 0,
+                        'ilvl' => $char['ilvl'] ?? 0,
+                        'gold_copper' => $char['gold'] ?? 0,
+                        'last_updated_at' => isset($char['lastUpdated'])
+                            ? now()->createFromTimestamp($char['lastUpdated'])
+                            : now(),
+                    ]
+                );
+                $summary['characters']++;
+
+                WowActiveAuction::where('character_key', $characterKey)->delete();
+                $activeAuctions = $char['activeAuctions'] ?? [];
+                if (is_array($activeAuctions)) {
+                    $rows = collect($activeAuctions)->map(fn($a) => [
+                        'character_key' => $characterKey,
+                        'item_id' => $a['itemID'] ?? null,
+                        'item_name' => $a['itemName'] ?? 'Desconocido',
+                        'quantity' => $a['quantity'] ?? 1,
+                        'buyout_copper' => $a['buyoutAmount'] ?? 0,
+                        'bid_copper' => $a['bidAmount'] ?? 0,
+                        'time_left_seconds' => $a['timeLeft'] ?? 0,
+                        'num_bids' => $a['numBids'] ?? 0,
+                        'synced_at' => now(),
+                    ])->all();
+
+                    if (!empty($rows)) {
+                        WowActiveAuction::insert($rows);
+                        $summary['active_auctions'] += count($rows);
+                    }
+                }
+
+                WowCharacterInventory::where('character_key', $characterKey)->delete();
+                $bags = $char['bags'] ?? [];
+                $bank = $char['bank'] ?? [];
+
+                $inventoryRows = [];
+
+                if (is_array($bags)) {
+                    foreach ($bags as $item) {
+                        $inventoryRows[] = [
+                            'character_key' => $characterKey,
+                            'location' => 'bag',
+                            'item_id' => $item['itemID'] ?? 0,
+                            'quantity' => $item['quantity'] ?? 1,
+                            'synced_at' => now(),
+                        ];
+                    }
+                }
+
+                if (is_array($bank)) {
+                    foreach ($bank as $item) {
+                        $inventoryRows[] = [
+                            'character_key' => $characterKey,
+                            'location' => 'bank',
+                            'item_id' => $item['itemID'] ?? 0,
+                            'quantity' => $item['quantity'] ?? 1,
+                            'synced_at' => now(),
+                        ];
+                    }
+                }
+
+                if (!empty($inventoryRows)) {
+                    collect($inventoryRows)->chunk(1000)->each(
+                        fn($chunk) => WowCharacterInventory::insert($chunk->all())
+                    );
+                    $summary['inventory_items'] += count($inventoryRows);
+                }
+            }
+
+            if ($warbandIn) {
+                WowWarband::updateOrCreate(
+                    ['id' => 1],
+                    [
+                        'gold_copper' => $warbandIn['gold'] ?? 0,
+                        'last_updated_at' => isset($warbandIn['lastUpdated'])
+                            ? now()->createFromTimestamp($warbandIn['lastUpdated'])
+                            : now(),
+                    ]
+                );
+            }
+
+            if (is_array($transactionsIn) && !empty($transactionsIn)) {
+                $rows = collect($transactionsIn)->map(fn($tx) => [
+                    'character_key' => $tx['character'] ?? '',
+                    'source_id' => $tx['id'] ?? null,
+                    'type' => $tx['type'] ?? 'sale',
+                    'item_name' => $tx['itemName'] ?? 'Desconocido',
+                    'item_id' => null,
+                    'counterparty' => $tx['counterparty'] ?? null,
+                    'sale_price_copper' => $tx['salePrice'] ?? 0,
+                    'deposit_copper' => $tx['deposit'] ?? 0,
+                    'consignment_copper' => $tx['consignment'] ?? 0,
+                    'amount_copper' => $tx['amount'] ?? 0,
+                    'occurred_at' => isset($tx['timestamp'])
+                        ? now()->createFromTimestamp($tx['timestamp'])
+                        : now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ])->filter(fn($row) => $row['source_id'] !== null)->values()->all();
+
+                if (!empty($rows)) {
+                    $beforeCount = WowAuctionTransaction::count();
+
+                    WowAuctionTransaction::upsert(
+                        $rows,
+                        ['character_key', 'source_id'],
+                        ['type', 'item_name', 'counterparty', 'sale_price_copper', 'deposit_copper', 'consignment_copper', 'amount_copper', 'occurred_at', 'updated_at']
+                    );
+
+                    $afterCount = WowAuctionTransaction::count();
+                    $summary['transactions_new'] = $afterCount - $beforeCount;
+                }
+            }
+
+            if (is_array($feesIn) && !empty($feesIn)) {
+                $rows = collect($feesIn)->map(fn($fee) => [
+                    'character_key' => $fee['character'] ?? '',
+                    'item_name' => $fee['itemName'] ?? 'Desconocido',
+                    'fee_copper' => $fee['fee'] ?? 0,
+                    'occurred_at' => isset($fee['timestamp'])
+                        ? now()->createFromTimestamp($fee['timestamp'])
+                        : now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ])->all();
+
+                if (!empty($rows)) {
+                    $beforeCount = WowPostFee::count();
+
+                    WowPostFee::upsert(
+                        $rows,
+                        ['character_key', 'item_name', 'fee_copper', 'occurred_at'],
+                        ['updated_at']
+                    );
+
+                    $afterCount = WowPostFee::count();
+                    $summary['fees_new'] = $afterCount - $beforeCount;
+                }
+            }
+        });
+
+        return response()->json(['ok' => true, 'summary' => $summary]);
+    }
+}
