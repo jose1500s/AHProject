@@ -7,6 +7,7 @@ const props = defineProps({
     ilvl: { type: Number, default: null },
     realms: { type: Array, required: true },
     days: { type: Number, default: 30 },
+    endpointPrefix: { type: String, default: 'items' },
 })
 
 const results = ref([])
@@ -17,6 +18,17 @@ const hiddenRealms = ref(new Set())
 
 const PALETTE = ['#818cf8', '#22d3ee', '#fbbf24', '#34d399', '#f472b6', '#a78bfa', '#fb923c', '#60a5fa']
 
+function buildUrl(realmSlug) {
+    if (props.endpointPrefix === 'commodities') {
+        const params = new URLSearchParams({ days: props.days })
+        return `/commodities/${props.itemId}/price-history?${params}`
+    }
+
+    const params = new URLSearchParams({ realm: realmSlug, days: props.days })
+    if (props.ilvl !== null) params.append('ilvl', props.ilvl)
+    return `/items/${props.itemId}/price-history?${params}`
+}
+
 async function fetchHistory() {
     if (!props.realms.length) {
         results.value = []
@@ -26,10 +38,7 @@ async function fetchHistory() {
     loading.value = true
     try {
         const fetched = await Promise.all(props.realms.map(async (realm) => {
-            const params = new URLSearchParams({ realm: realm.slug, days: props.days })
-            if (props.ilvl !== null) params.append('ilvl', props.ilvl)
-
-            const res = await fetch(`/items/${props.itemId}/price-history?${params}`)
+            const res = await fetch(buildUrl(realm.slug))
             const data = await res.json()
 
             return { slug: realm.slug, name: realm.name, history: data.history }
@@ -42,7 +51,7 @@ async function fetchHistory() {
     }
 }
 
-watch(() => [props.itemId, props.ilvl, props.realms], fetchHistory, { immediate: true, deep: true })
+watch(() => [props.itemId, props.ilvl, props.realms, props.endpointPrefix], fetchHistory, { immediate: true, deep: true })
 
 const hasEnoughData = computed(() => results.value.some(r => r.history.length >= 1))
 
@@ -234,7 +243,7 @@ const volumeChartOptions = computed(() => ({
             Aún no hay historial para graficar
         </div>
         <template v-else>
-            <div class="mb-3 flex flex-wrap items-center gap-3">
+            <div v-if="results.length > 1" class="mb-3 flex flex-wrap items-center gap-3">
                 <button
                     v-for="(r, i) in results"
                     :key="r.name"

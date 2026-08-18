@@ -8,6 +8,8 @@ use App\Models\Item;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Auction;
 use App\Models\PriceHistory;
+use App\Models\CommodityAuction;
+use App\Models\CommodityPriceHistory;
 use Illuminate\Support\Facades\DB;
 use App\Models\ItemLevelLookup;
 
@@ -836,5 +838,183 @@ class BlizzApiService
         }
 
         return $results;
+    }
+
+    public function syncCommoditiesToDb(bool $force = false): array
+    {
+        $lock = Cache::lock('sync_lock:commodities', 60);
+
+        if (!$lock->get()) {
+            $lock->block(60);
+            return ['updated' => false, 'skipped_concurrent' => true];
+        }
+
+        try {
+            $lastModifiedKey = 'commodities_last_modified';
+
+            ini_set('memory_limit', '1024M');
+
+            $request = Http::withToken($this->getAccessToken())->timeout(90);
+
+            if (!$force && ($lastModified = Cache::get($lastModifiedKey))) {
+                $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
+            }
+
+            $response = $request->get(
+                "https://{$this->region}.api.blizzard.com/data/wow/auctions/commodities",
+                ['namespace' => "dynamic-{$this->region}", 'locale' => 'es_MX']
+            );
+
+            if ($response->status() === 304) {
+                return ['updated' => false];
+            }
+
+            $auctions = $response->json('auctions', []);
+            $totalAuctions = count($auctions);
+
+            DB::transaction(function () use (&$auctions) {
+                CommodityAuction::truncate();
+
+                $now = now();
+                $rows = [];
+
+                foreach ($auctions as $a) {
+                    $rows[] = [
+                        'blizzard_auction_id' => $a['id'],
+                        'item_id' => $a['item']['id'],
+                        'quantity' => $a['quantity'] ?? 1,
+                        'unit_price' => $a['unit_price'] ?? 0,
+                        'time_left' => $a['time_left'] ?? null,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+
+                    if (count($rows) >= 1000) {
+                        CommodityAuction::upsert(
+                            $rows,
+                            ['blizzard_auction_id'],
+                            ['item_id', 'quantity', 'unit_price', 'time_left', 'updated_at']
+                        );
+                        $rows = [];
+                    }
+                }
+
+                if (!empty($rows)) {
+                    CommodityAuction::upsert(
+                        $rows,
+                        ['blizzard_auction_id'],
+                        ['item_id', 'quantity', 'unit_price', 'time_left', 'updated_at']
+                    );
+                }
+
+                $auctions = null;
+            });
+
+            Cache::put($lastModifiedKey, $response->header('Last-Modified'), now()->addDay());
+
+            $this->saveCommodityPriceHistorySnapshot();
+
+            return ['updated' => true, 'count' => $totalAuctions];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function saveCommodityPriceHistorySnapshot(): void
+    {
+        $snapshot = DB::table('commodity_auctions')
+            ->select(
+                'item_id',
+                DB::raw('MIN(unit_price) as min_price_copper'),
+                DB::raw('COUNT(*) as listings'),
+                DB::raw('SUM(quantity) as volume')
+            )
+            ->groupBy('item_id')
+            ->get()
+            ->map(fn($row) => [
+                'item_id' => $row->item_id,
+                'min_price_copper' => $row->min_price_copper,
+                'listings' => $row->listings,
+                'volume' => $row->volume,
+                'snapshot_at' => now(),
+            ]);
+
+        $snapshot->chunk(1000)->each(fn($chunk) => CommodityPriceHistory::insert($chunk->all()));
+    }
+
+    public function getCommodityListings(?string $search = null, int $perPage = 24)
+    {
+        return DB::table('commodity_auctions')
+            ->join('items', 'items.blizzard_id', '=', 'commodity_auctions.item_id')
+            ->select(
+                'items.blizzard_id as item_id',
+                'items.name',
+                'items.quality',
+                'items.item_class',
+                'items.item_subclass',
+                'items.icon_url',
+                DB::raw('MIN(commodity_auctions.unit_price) as min_price_copper'),
+                DB::raw('COUNT(*) as listings'),
+                DB::raw('SUM(commodity_auctions.quantity) as volume')
+            )
+            ->when($search, fn($q) => $q->where('items.name', 'ilike', "%{$search}%"))
+            ->groupBy('items.blizzard_id', 'items.name', 'items.quality', 'items.item_class', 'items.item_subclass', 'items.icon_url')
+            ->orderBy('items.name')
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    public function getCommodityLastSyncedAt(): ?string
+    {
+        return Cache::get('commodities_last_modified');
+    }
+
+    public function getCommodityPriceHistory(int $itemId, int $days = 30): array
+    {
+        $history = DB::table('commodity_price_history')
+            ->select('snapshot_at', 'min_price_copper', 'listings')
+            ->where('item_id', $itemId)
+            ->where('snapshot_at', '>=', now()->subDays($days))
+            ->orderBy('snapshot_at')
+            ->get()
+            ->map(fn($row) => [
+                'snapshot_at' => $row->snapshot_at,
+                'price_gold' => round($row->min_price_copper / 10000, 2),
+                'listings' => $row->listings,
+            ]);
+
+        $live = $this->getLiveCommodityPrice($itemId);
+
+        if ($live !== null) {
+            $lastSaved = $history->last();
+            $isDuplicate = $lastSaved && abs(now()->diffInMinutes($lastSaved['snapshot_at'])) < 5;
+
+            if (!$isDuplicate) {
+                $history->push([
+                    'snapshot_at' => now(),
+                    'price_gold' => $live['price_gold'],
+                    'listings' => $live['listings'],
+                ]);
+            }
+        }
+
+        return $history->values()->all();
+    }
+
+    protected function getLiveCommodityPrice(int $itemId): ?array
+    {
+        $row = DB::table('commodity_auctions')
+            ->where('item_id', $itemId)
+            ->selectRaw('MIN(unit_price) as min_price, COUNT(*) as listings')
+            ->first();
+
+        if (!$row || $row->min_price === null) {
+            return null;
+        }
+
+        return [
+            'price_gold' => round($row->min_price / 10000, 2),
+            'listings' => $row->listings,
+        ];
     }
 }

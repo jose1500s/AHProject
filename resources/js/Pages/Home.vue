@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { Gavel, Boxes } from '@lucide/vue'
 import Layout from './Layout.vue'
 import ItemCard from './Components/ItemCard.vue';
 import CategoryFilter from './Components/CategoryFilter.vue';
 import Pagination from './Components/Pagination.vue';
 import AuctionBreakdownModal from './Components/AuctionBreakdownModal.vue';
 import RealmComparisonSection from './Components/RealmComparisonSection.vue';
+import CommoditiesGrid from './Components/CommoditiesGrid.vue';
 import { useRealmSelection } from '../Composables/useRealmSelection.js'
 
 const props = defineProps({
@@ -15,6 +17,8 @@ const props = defineProps({
 })
 
 const { realmSlug } = useRealmSelection(props.realms)
+
+const activeTab = ref('auctions')
 
 const selectedItemId = ref(null)
 const selectedItemIlvl = ref(null)
@@ -49,17 +53,54 @@ onMounted(() => { mounted.value = true })
 <template>
     <Layout :realms="realms" :last-synced-at="lastSyncedAt">
         <main class="flex flex-col mt-5 items-center justify-center gap-5 w-[90vw] mx-auto">
-            <CategoryFilter />
-            <div class="grid grid-cols-5 gap-2 w-full">
-                <ItemCard v-for="listing in auctions.data" :key="listing.id" :name="listing.name"
-                    :subtitle="listing.subtitle" :quality="listing.quality" :icon="listing.icon_url"
-                    :gold="listing.gold" :silver="listing.silver" :copper="listing.copper" :listings="listing.listings"
-                    :volume="listing.volume" @click="openFromCard(listing.id)" />
+            <div class="flex items-center gap-1 self-start rounded-xl border border-white/10 bg-[#12142b] p-1">
+                <button
+                    type="button"
+                    @click="activeTab = 'auctions'"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                    :class="activeTab === 'auctions' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
+                >
+                    <Gavel class="size-4" />
+                    Subastas
+                </button>
+                <button
+                    type="button"
+                    @click="activeTab = 'commodities'"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                    :class="activeTab === 'commodities' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
+                >
+                    <Boxes class="size-4" />
+                    Commodities
+                </button>
             </div>
 
-            <Pagination :links="auctions.links" />
+            <template v-if="activeTab === 'auctions'">
+                <CategoryFilter />
+                <div class="grid grid-cols-5 gap-2 w-full">
+                    <ItemCard
+                        v-for="listing in auctions.data"
+                        :key="listing.id"
+                        :name="listing.name"
+                        :subtitle="listing.subtitle"
+                        :quality="listing.quality"
+                        :icon="listing.icon_url"
+                        :gold="listing.gold"
+                        :silver="listing.silver"
+                        :copper="listing.copper"
+                        :listings="listing.listings"
+                        :volume="listing.volume"
+                        @click="openFromCard(listing.id)"
+                    />
+                </div>
 
-            <RealmComparisonSection :realms="realms" @select-item="openFromComparison" />
+                <Pagination :links="auctions.links" />
+
+                <RealmComparisonSection :realms="realms" @select-item="openFromComparison" />
+            </template>
+
+            <template v-else>
+                <CommoditiesGrid />
+            </template>
         </main>
 
         <AuctionBreakdownModal
