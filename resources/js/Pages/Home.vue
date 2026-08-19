@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { Gavel, Boxes } from '@lucide/vue'
+import { ref, onMounted, watch } from 'vue'
+import { Gavel, Boxes, Wallet } from '@lucide/vue'
 import Layout from './Layout.vue'
 import ItemCard from './Components/ItemCard.vue';
 import CategoryFilter from './Components/CategoryFilter.vue';
@@ -8,6 +8,7 @@ import Pagination from './Components/Pagination.vue';
 import AuctionBreakdownModal from './Components/AuctionBreakdownModal.vue';
 import RealmComparisonSection from './Components/RealmComparisonSection.vue';
 import CommoditiesGrid from './Components/CommoditiesGrid.vue';
+import MyGoldDashboard from './Components/MyGoldDashboard.vue';
 import { useRealmSelection } from '../Composables/useRealmSelection.js'
 
 const props = defineProps({
@@ -18,6 +19,7 @@ const props = defineProps({
 
 const { realmSlug } = useRealmSelection(props.realms)
 
+const VALID_TABS = ['auctions', 'commodities', 'mygold']
 const activeTab = ref('auctions')
 
 const selectedItemId = ref(null)
@@ -47,7 +49,20 @@ function closeModal() {
 }
 
 const mounted = ref(false)
-onMounted(() => { mounted.value = true })
+onMounted(() => {
+    mounted.value = true
+
+    try {
+        const stored = localStorage.getItem('active_tab')
+        if (stored && VALID_TABS.includes(stored)) {
+            activeTab.value = stored
+        }
+    } catch {}
+})
+
+watch(activeTab, (value) => {
+    try { localStorage.setItem('active_tab', value) } catch {}
+})
 </script>
 
 <template>
@@ -71,6 +86,15 @@ onMounted(() => { mounted.value = true })
                 >
                     <Boxes class="size-4" />
                     Commodities
+                </button>
+                <button
+                    type="button"
+                    @click="activeTab = 'mygold'"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                    :class="activeTab === 'mygold' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
+                >
+                    <Wallet class="size-4" />
+                    Mi Oro
                 </button>
             </div>
 
@@ -100,6 +124,10 @@ onMounted(() => { mounted.value = true })
 
             <div v-show="activeTab === 'commodities'" class="w-full">
                 <CommoditiesGrid />
+            </div>
+
+             <div v-show="activeTab === 'mygold'" class="w-full">
+                <MyGoldDashboard />
             </div>
         </main>
 
