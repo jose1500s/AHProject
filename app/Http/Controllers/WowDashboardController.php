@@ -51,7 +51,7 @@ class WowDashboardController extends Controller
         }
 
         if (!$item) {
-            return ['name' => $fallbackName ?? "Ítem #{$itemId}", 'icon_url' => null];
+            return ['name' => $fallbackName ?? "Ítem #{$itemId}", 'icon_url' => null, 'quality' => null];
         }
 
         $isGenericName = !$fallbackName
@@ -62,6 +62,7 @@ class WowDashboardController extends Controller
         return [
             'name' => $isGenericName ? $item->name : $fallbackName,
             'icon_url' => $item->icon_url ?: null,
+            'quality' => $item->quality,
         ];
     }
 
@@ -103,12 +104,14 @@ class WowDashboardController extends Controller
         $salesCount = (clone $salesQuery)->count();
         $purchasesCount = (clone $purchasesQuery)->count();
 
+        $todayStart = now()->startOfDay();
+        $todayEarned = (clone $salesQuery)->where('occurred_at', '>=', $todayStart)->sum('amount_copper');
+        $todaySpent = (clone $purchasesQuery)->where('occurred_at', '>=', $todayStart)->sum(DB::raw('abs(amount_copper)'));
+
         $activeAuctionsQuery = WowActiveAuction::query();
         if ($characterKey) {
             $activeAuctionsQuery->where('character_key', $characterKey);
         }
-        // buyout/bid vienen por unidad (confirmado contra el panel de "Mis subastas" en juego),
-        // hay que multiplicar por quantity para obtener el total real invertido
         $invested = (clone $activeAuctionsQuery)->sum(DB::raw('quantity * GREATEST(buyout_copper, bid_copper)'));
         $activeCount = (clone $activeAuctionsQuery)->count();
 
@@ -133,8 +136,8 @@ class WowDashboardController extends Controller
                 'icon_url' => $bestFlipMeta['icon_url'],
                 'amount' => $this->formatCoin($bestFlip->amount_copper),
             ] : null,
-            'gold_inflow' => $this->formatCoin($totalEarned),
-            'gold_outflow' => $this->formatCoin($totalSpent),
+            'today_earned' => $this->formatCoin($todayEarned),
+            'today_spent' => $this->formatCoin($todaySpent),
         ]);
     }
 
@@ -202,5 +205,40 @@ class WowDashboardController extends Controller
         });
 
         return response()->json($transactions);
+    }
+
+    public function salesByItem(Request $request)
+    {
+        $characterKey = $request->query('character');
+
+        $query = WowAuctionTransaction::where('type', 'sale')->orderByDesc('occurred_at');
+        if ($characterKey) {
+            $query->where('character_key', $characterKey);
+        }
+
+        $sales = $query->get();
+
+        $grouped = $sales->groupBy('item_name')->map(function ($group, $itemName) {
+            $first = $group->first();
+            $meta = $this->resolveItemMeta($first->item_id, $itemName);
+            $totalCopper = $group->sum('amount_copper');
+
+            return [
+                'item_name' => $meta['name'],
+                'icon_url' => $meta['icon_url'],
+                'quality' => $meta['quality'],
+                'sales_count' => $group->count(),
+                'total_copper' => $totalCopper,
+                'total' => $this->formatCoin($totalCopper),
+                'sales' => $group->map(fn($tx) => [
+                    'id' => $tx->id,
+                    'counterparty' => $tx->counterparty,
+                    'amount' => $this->formatCoin($tx->amount_copper),
+                    'occurred_at' => $tx->occurred_at,
+                ])->values(),
+            ];
+        })->sortByDesc('total_copper')->values();
+
+        return response()->json(['items' => $grouped]);
     }
 }

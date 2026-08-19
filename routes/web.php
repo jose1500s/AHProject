@@ -25,3 +25,4 @@ Route::get('/api/wow/characters', [WowDashboardController::class, 'characters'])
 Route::get('/api/wow/overview', [WowDashboardController::class, 'overview']);
 Route::get('/api/wow/active-auctions', [WowDashboardController::class, 'activeAuctions']);
 Route::get('/api/wow/transactions', [WowDashboardController::class, 'transactions']);
+Route::get('/api/wow/sales-by-item', [WowDashboardController::class, 'salesByItem']);

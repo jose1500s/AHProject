@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw } from '@lucide/vue'
+import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag } from '@lucide/vue'
 import CoinAmount from './CoinAmount.vue'
 
 const CHARACTER_STORAGE_KEY = 'mygold_selected_character'
@@ -9,18 +9,23 @@ const characters = ref([])
 const warband = ref(null)
 const selectedCharacter = ref(null)
 
-try {
-    selectedCharacter.value = localStorage.getItem(CHARACTER_STORAGE_KEY) || null
-} catch {}
+if (typeof window !== 'undefined') {
+    try {
+        selectedCharacter.value = localStorage.getItem(CHARACTER_STORAGE_KEY) || null
+    } catch {}
+}
 
 const overview = ref(null)
 const activeAuctions = ref([])
 const transactions = ref({ data: [], links: [] })
+const salesByItem = ref([])
 const txFilter = ref('all')
 const loadingTx = ref(false)
 const characterMenuOpen = ref(false)
 const auctionSearch = ref('')
 const txSearch = ref('')
+const salesByItemSearch = ref('')
+const openSalesItems = ref(new Set())
 const syncing = ref(false)
 const syncCooldown = ref(0)
 
@@ -66,12 +71,22 @@ async function fetchTransactions(url = null) {
     }
 }
 
+async function fetchSalesByItem() {
+    const params = new URLSearchParams()
+    if (selectedCharacter.value) params.append('character', selectedCharacter.value)
+
+    const res = await fetch(`/api/wow/sales-by-item?${params}`)
+    const data = await res.json()
+    salesByItem.value = data.items
+}
+
 async function refreshAll() {
     await Promise.all([
         fetchCharacters(),
         fetchOverview(),
         fetchActiveAuctions(),
         fetchTransactions(),
+        fetchSalesByItem(),
     ])
 }
 
@@ -144,6 +159,34 @@ const filteredTransactions = computed(() => {
     return (transactions.value.data ?? []).filter(tx => normalizeText(tx.item_name).includes(q))
 })
 
+const filteredSalesByItem = computed(() => {
+    const q = normalizeText(salesByItemSearch.value.trim())
+    if (!q) return salesByItem.value
+    return salesByItem.value.filter(item => normalizeText(item.item_name).includes(q))
+})
+
+const maxSalesByItemTotal = computed(() => {
+    if (!salesByItem.value.length) return 1
+    return Math.max(...salesByItem.value.map(i => i.total_copper), 1)
+})
+
+function salesBarWidth(totalCopper) {
+    return `${Math.max(4, (totalCopper / maxSalesByItemTotal.value) * 100)}%`
+}
+
+function toggleSalesItem(itemName) {
+    const next = new Set(openSalesItems.value)
+    next.has(itemName) ? next.delete(itemName) : next.add(itemName)
+    openSalesItems.value = next
+}
+
+function formatCompactGold(gold) {
+    const n = gold ?? 0
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'm'
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+    return String(n)
+}
+
 function formatTimeLeft(seconds) {
     if (seconds < 3600) return `${Math.round(seconds / 60)}m`
     if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
@@ -168,6 +211,14 @@ function formatFullDate(dateStr) {
     })
 }
 
+const todayFormatted = computed(() => {
+    const d = new Date()
+    const day = String(d.getDate()).padStart(2, '0')
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const year = d.getFullYear()
+    return `${day}/${month}/${year}`
+})
+
 const CLASS_COLORS = {
     Warrior: 'text-[#C79C6E]', Paladin: 'text-[#F58CBA]', Hunter: 'text-[#ABD473]',
     Rogue: 'text-[#FFF569]', Priest: 'text-white', 'Death Knight': 'text-[#C41F3B]',
@@ -175,10 +226,26 @@ const CLASS_COLORS = {
     Monk: 'text-[#00FF96]', Druid: 'text-[#FF7D0A]', 'Demon Hunter': 'text-[#A330C9]',
     Evoker: 'text-[#33937F]',
 }
+
+const QUALITY_COLORS = {
+    poor: 'text-slate-400', common: 'text-slate-100', uncommon: 'text-emerald-400',
+    rare: 'text-sky-400', epic: 'text-purple-400', legendary: 'text-orange-400',
+}
+
+const QUALITY_BAR_COLORS = {
+    poor: 'bg-slate-400', common: 'bg-slate-300', uncommon: 'bg-emerald-500',
+    rare: 'bg-sky-500', epic: 'bg-purple-500', legendary: 'bg-orange-500',
+}
 </script>
 
 <template>
     <div class="flex flex-col gap-5 w-full pb-16">
+        <!-- fecha actual -->
+        <div class="flex items-center gap-2 text-sm text-slate-500">
+            <Calendar class="size-4" />
+            {{ todayFormatted }}
+        </div>
+
         <!-- selector de personaje + boton de sync -->
         <div class="flex items-center gap-3">
             <div class="relative w-72">
@@ -216,7 +283,9 @@ const CLASS_COLORS = {
                             <span :class="CLASS_COLORS[c.class] ?? 'text-slate-300'" class="font-medium">{{ c.name }}</span>
                             <span class="text-slate-500"> · {{ c.realm }}</span>
                         </span>
-                        <span class="text-xs text-slate-500">ilvl {{ c.ilvl }}</span>
+                        <span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
+                            {{ formatCompactGold(c.gold.gold) }}<span class="size-2 rounded-full bg-amber-400"></span>
+                        </span>
                     </button>
                 </div>
             </div>
@@ -306,9 +375,9 @@ const CLASS_COLORS = {
 
             <div class="rounded-xl border border-white/10 bg-[#12142b] p-4">
                 <div class="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-emerald-400">
-                    <ArrowDown class="size-3.5" /> Entradas de oro
+                    <ArrowDown class="size-3.5" /> Ganado hoy
                 </div>
-                <CoinAmount :gold="overview.gold_inflow.gold" :silver="overview.gold_inflow.silver" :copper="overview.gold_inflow.copper" />
+                <CoinAmount :gold="overview.today_earned.gold" :silver="overview.today_earned.silver" :copper="overview.today_earned.copper" />
                 <div class="mt-2 h-1.5 w-full rounded-full bg-white/5">
                     <div class="h-full rounded-full bg-emerald-500" style="width: 100%"></div>
                 </div>
@@ -316,9 +385,9 @@ const CLASS_COLORS = {
 
             <div class="rounded-xl border border-white/10 bg-[#12142b] p-4">
                 <div class="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-red-400">
-                    <ArrowUp class="size-3.5" /> Salidas de oro
+                    <ArrowUp class="size-3.5" /> Gastado hoy
                 </div>
-                <CoinAmount :gold="overview.gold_outflow.gold" :silver="overview.gold_outflow.silver" :copper="overview.gold_outflow.copper" />
+                <CoinAmount :gold="overview.today_spent.gold" :silver="overview.today_spent.silver" :copper="overview.today_spent.copper" />
                 <div class="mt-2 h-1.5 w-full rounded-full bg-white/5">
                     <div class="h-full rounded-full bg-red-500" style="width: 100%"></div>
                 </div>
@@ -411,6 +480,63 @@ const CLASS_COLORS = {
                             </span>
                             <CoinAmount :gold="tx.amount.gold" :silver="tx.amount.silver" :copper="tx.amount.copper" size="text-xs" />
                         </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ventas por item -->
+        <div class="rounded-2xl border border-white/10 bg-[#12142b] p-5">
+            <div class="mb-3 flex items-center justify-between gap-3">
+                <h3 class="flex shrink-0 items-center gap-2 text-sm font-bold text-slate-100">
+                    <ShoppingBag class="size-4 text-indigo-400" />
+                    Ventas por ítem
+                </h3>
+                <div class="relative w-56">
+                    <Search class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
+                    <input v-model="salesByItemSearch" type="text" placeholder="Buscar ítem..."
+                        class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-2 text-xs text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60 focus:bg-white/10" />
+                </div>
+            </div>
+
+            <div v-if="!filteredSalesByItem.length" class="py-6 text-center text-sm text-slate-500">
+                {{ salesByItem.length ? 'Sin resultados' : 'Aún no hay ventas registradas' }}
+            </div>
+
+            <div v-else class="app-scroll flex max-h-[32rem] flex-col overflow-y-auto pr-1">
+                <div v-for="item in filteredSalesByItem" :key="item.item_name" class="border-b border-white/5 last:border-b-0">
+                    <button type="button" @click="toggleSalesItem(item.item_name)"
+                        class="flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-white/5">
+                        <img v-if="item.icon_url" :src="item.icon_url" class="size-9 shrink-0 rounded" />
+                        <Package v-else class="size-9 shrink-0 text-slate-600" />
+
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm font-medium" :class="QUALITY_COLORS[item.quality] ?? 'text-slate-100'">
+                                {{ item.item_name }}
+                            </p>
+                            <p class="text-xs text-slate-500">{{ item.sales_count }} venta{{ item.sales_count === 1 ? '' : 's' }}</p>
+                            <div class="mt-1.5 h-1 w-full max-w-xs rounded-full bg-white/5">
+                                <div class="h-full rounded-full transition-all"
+                                    :class="QUALITY_BAR_COLORS[item.quality] ?? 'bg-emerald-500'"
+                                    :style="{ width: salesBarWidth(item.total_copper) }"></div>
+                            </div>
+                        </div>
+
+                        <CoinAmount :gold="item.total.gold" :silver="item.total.silver" :copper="item.total.copper" size="text-sm" />
+                        <ChevronDown class="size-4 shrink-0 text-slate-500 transition-transform"
+                            :class="{ 'rotate-180': openSalesItems.has(item.item_name) }" />
+                    </button>
+
+                    <div v-if="openSalesItems.has(item.item_name)" class="flex flex-col gap-1 pb-3 pl-12">
+                        <div v-for="sale in item.sales" :key="sale.id"
+                            class="flex items-center justify-between rounded-lg px-2 py-1.5 text-xs hover:bg-white/5">
+                            <span class="text-slate-400">
+                                <span v-if="sale.counterparty">Vendido a {{ sale.counterparty }}</span>
+                                <span v-else>Venta</span>
+                                · <span :title="formatFullDate(sale.occurred_at)">{{ timeAgo(sale.occurred_at) }}</span>
+                            </span>
+                            <CoinAmount :gold="sale.amount.gold" :silver="sale.amount.silver" :copper="sale.amount.copper" size="text-xs" />
+                        </div>
                     </div>
                 </div>
             </div>
