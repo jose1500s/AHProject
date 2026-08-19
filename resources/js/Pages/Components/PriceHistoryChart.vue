@@ -10,6 +10,15 @@ const props = defineProps({
     endpointPrefix: { type: String, default: 'items' },
 })
 
+const RANGES = [
+    { label: '1D', days: 1 },
+    { label: '1W', days: 7 },
+    { label: '1M', days: 30 },
+    { label: '3M', days: 90 },
+]
+
+const selectedRangeDays = ref(props.days)
+
 const results = ref([])
 const loading = ref(false)
 const priceChartRef = ref(null)
@@ -20,11 +29,11 @@ const PALETTE = ['#818cf8', '#22d3ee', '#fbbf24', '#34d399', '#f472b6', '#a78bfa
 
 function buildUrl(realmSlug) {
     if (props.endpointPrefix === 'commodities') {
-        const params = new URLSearchParams({ days: props.days })
+        const params = new URLSearchParams({ days: selectedRangeDays.value })
         return `/commodities/${props.itemId}/price-history?${params}`
     }
 
-    const params = new URLSearchParams({ realm: realmSlug, days: props.days })
+    const params = new URLSearchParams({ realm: realmSlug, days: selectedRangeDays.value })
     if (props.ilvl !== null) params.append('ilvl', props.ilvl)
     return `/items/${props.itemId}/price-history?${params}`
 }
@@ -52,6 +61,7 @@ async function fetchHistory() {
 }
 
 watch(() => [props.itemId, props.ilvl, props.realms, props.endpointPrefix], fetchHistory, { immediate: true, deep: true })
+watch(selectedRangeDays, fetchHistory)
 
 const hasEnoughData = computed(() => results.value.some(r => r.history.length >= 1))
 
@@ -99,7 +109,7 @@ function toggleRealm(name) {
 
 const priceChartOptions = computed(() => ({
     chart: {
-        type: 'line',
+        type: 'area',
         toolbar: { show: false },
         zoom: { enabled: false },
         background: 'transparent',
@@ -108,12 +118,21 @@ const priceChartOptions = computed(() => ({
     theme: { mode: 'dark' },
     colors: colors.value,
     dataLabels: { enabled: false },
-    stroke: { curve: 'straight', width: 2 },
+    stroke: { curve: 'smooth', width: 2.5 },
+    fill: {
+        type: 'gradient',
+        gradient: {
+            shadeIntensity: 1,
+            opacityFrom: 0.35,
+            opacityTo: 0.02,
+            stops: [0, 90, 100],
+        },
+    },
     markers: {
-        size: 5,
+        size: 0,
         strokeColors: '#12142b',
         strokeWidth: 2,
-        hover: { size: 7 },
+        hover: { size: 5 },
     },
     grid: {
         borderColor: 'rgba(255,255,255,0.06)',
@@ -218,22 +237,35 @@ const volumeChartOptions = computed(() => ({
 <template>
     <div class="border-b border-white/5 px-5 py-4">
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Historial de precio ({{ days }}d)</h3>
+            <h3 class="text-xs font-semibold uppercase tracking-widest text-slate-400">Historial de precio ({{ selectedRangeDays }}d)</h3>
 
-            <div v-if="hasEnoughData" class="flex flex-wrap items-center gap-3">
-                <span v-for="t in trends" :key="t.name" class="flex items-center gap-1 text-xs font-semibold">
-                    <span class="size-1.5 rounded-full" :style="{ backgroundColor: t.color }"></span>
-                    <span class="text-slate-500">{{ t.name }}</span>
-                    <template v-if="t.trend !== null">
-                        <TrendingUp v-if="t.trend > 0" class="size-3 text-emerald-400" />
-                        <TrendingDown v-else-if="t.trend < 0" class="size-3 text-red-400" />
-                        <Minus v-else class="size-3 text-slate-500" />
-                        <span :class="t.trend > 0 ? 'text-emerald-400' : t.trend < 0 ? 'text-red-400' : 'text-slate-500'">
-                            {{ t.trend > 0 ? '+' : '' }}{{ t.trend.toFixed(1) }}%
-                        </span>
-                    </template>
-                </span>
+            <div class="flex items-center gap-1 rounded-lg border border-white/10 p-0.5">
+                <button
+                    v-for="r in RANGES"
+                    :key="r.label"
+                    type="button"
+                    @click="selectedRangeDays = r.days"
+                    class="rounded px-2 py-1 text-[11px] font-semibold transition-colors"
+                    :class="selectedRangeDays === r.days ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-500 hover:text-white'"
+                >
+                    {{ r.label }}
+                </button>
             </div>
+        </div>
+
+        <div v-if="hasEnoughData" class="mb-2 flex flex-wrap items-center gap-3">
+            <span v-for="t in trends" :key="t.name" class="flex items-center gap-1 text-xs font-semibold">
+                <span class="size-1.5 rounded-full" :style="{ backgroundColor: t.color }"></span>
+                <span class="text-slate-500">{{ t.name }}</span>
+                <template v-if="t.trend !== null">
+                    <TrendingUp v-if="t.trend > 0" class="size-3 text-emerald-400" />
+                    <TrendingDown v-else-if="t.trend < 0" class="size-3 text-red-400" />
+                    <Minus v-else class="size-3 text-slate-500" />
+                    <span :class="t.trend > 0 ? 'text-emerald-400' : t.trend < 0 ? 'text-red-400' : 'text-slate-500'">
+                        {{ t.trend > 0 ? '+' : '' }}{{ t.trend.toFixed(1) }}%
+                    </span>
+                </template>
+            </span>
         </div>
 
         <div v-if="loading" class="flex h-40 items-center justify-center text-sm text-slate-500">
@@ -263,7 +295,7 @@ const volumeChartOptions = computed(() => ({
                 </button>
             </div>
 
-            <apexchart ref="priceChartRef" type="line" height="220" :options="priceChartOptions" :series="priceSeries" />
+            <apexchart ref="priceChartRef" type="area" height="220" :options="priceChartOptions" :series="priceSeries" />
 
             <p class="mb-1 mt-4 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Volumen (auctions)</p>
             <apexchart ref="volumeChartRef" type="bar" height="180" :options="volumeChartOptions" :series="volumeSeries" />
