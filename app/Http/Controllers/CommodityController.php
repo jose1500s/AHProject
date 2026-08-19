@@ -37,6 +37,17 @@ class CommodityController extends Controller
         ]);
     }
 
+    public function sync(BlizzApiService $blizzard)
+    {
+        $result = $blizzard->syncCommoditiesToDb(true);
+
+        return response()->json([
+            'ok' => true,
+            'updated' => $result['updated'] ?? false,
+            'lastSyncedAt' => $blizzard->getCommodityLastSyncedAt(),
+        ]);
+    }
+
     public function priceHistory(int $itemId, Request $request, BlizzApiService $blizzard)
     {
         $days = (int) $request->query('days', 30);

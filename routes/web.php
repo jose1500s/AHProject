@@ -17,6 +17,7 @@ Route::get('/api/items/search', [ItemSearchController::class, 'search']);
 Route::get('/api/items/{itemId}/variants', [ItemAuctionsController::class, 'variants']);
 
 Route::get('/api/commodities', [CommodityController::class, 'list']);
+Route::post('/api/commodities/sync', [CommodityController::class, 'sync']);
 Route::get('/commodities/{itemId}/price-history', [CommodityController::class, 'priceHistory']);
 Route::get('/commodities/{itemId}/item-detail', [CommodityController::class, 'itemDetail']);
 Route::post('/api/wow-sync', [WowSyncController::class, 'ingest']);

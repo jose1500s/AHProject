@@ -17,8 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
         ]);
 
-        $middleware->validateCsrfTokens(except: [
+        $middleware->preventRequestForgery(except: [
             'api/wow-sync',
+            'api/commodities/sync',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

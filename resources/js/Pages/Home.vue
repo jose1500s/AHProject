@@ -21,6 +21,7 @@ const { realmSlug } = useRealmSelection(props.realms)
 
 const VALID_TABS = ['auctions', 'commodities', 'mygold']
 const activeTab = ref('auctions')
+const commoditiesSyncing = ref(false)
 
 const selectedItemId = ref(null)
 const selectedItemIlvl = ref(null)
@@ -48,6 +49,11 @@ function closeModal() {
     compareRealms.value = []
 }
 
+function switchTab(tab) {
+    if (commoditiesSyncing.value) return
+    activeTab.value = tab
+}
+
 const mounted = ref(false)
 onMounted(() => {
     mounted.value = true
@@ -71,8 +77,9 @@ watch(activeTab, (value) => {
             <div class="flex items-center gap-1 self-start rounded-xl border border-white/10 bg-[#12142b] p-1">
                 <button
                     type="button"
-                    @click="activeTab = 'auctions'"
-                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                    @click="switchTab('auctions')"
+                    :disabled="commoditiesSyncing"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                     :class="activeTab === 'auctions' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
                 >
                     <Gavel class="size-4" />
@@ -80,8 +87,9 @@ watch(activeTab, (value) => {
                 </button>
                 <button
                     type="button"
-                    @click="activeTab = 'commodities'"
-                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                    @click="switchTab('commodities')"
+                    :disabled="commoditiesSyncing"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                     :class="activeTab === 'commodities' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
                 >
                     <Boxes class="size-4" />
@@ -89,8 +97,9 @@ watch(activeTab, (value) => {
                 </button>
                 <button
                     type="button"
-                    @click="activeTab = 'mygold'"
-                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                    @click="switchTab('mygold')"
+                    :disabled="commoditiesSyncing"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                     :class="activeTab === 'mygold' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
                 >
                     <Wallet class="size-4" />
@@ -123,7 +132,7 @@ watch(activeTab, (value) => {
             </div>
 
             <div v-show="activeTab === 'commodities'" class="w-full">
-                <CommoditiesGrid />
+                <CommoditiesGrid @syncing="commoditiesSyncing = $event" />
             </div>
 
              <div v-show="activeTab === 'mygold'" class="w-full">
