@@ -8,11 +8,14 @@ use App\Models\WowCharacter;
 use App\Models\WowWarband;
 use App\Models\WowActiveAuction;
 use App\Models\WowAuctionTransaction;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class WowDashboardController extends Controller
 {
+    private const LOCAL_TIMEZONE = 'America/Mexico_City';
+
     private array $classIconMap = [
         'WARRIOR' => 'warrior', 'PALADIN' => 'paladin', 'HUNTER' => 'hunter',
         'ROGUE' => 'rogue', 'PRIEST' => 'priest', 'DEATHKNIGHT' => 'deathknight',
@@ -104,7 +107,10 @@ class WowDashboardController extends Controller
         $salesCount = (clone $salesQuery)->count();
         $purchasesCount = (clone $purchasesQuery)->count();
 
-        $todayStart = now()->startOfDay();
+        // "hoy" se calcula en la zona horaria del jugador, no en la del servidor
+        // (evita que ventas de las últimas horas del día se cuenten como "ayer"
+        // si el servidor guarda todo en UTC pero el jugador está en otro huso)
+        $todayStart = Carbon::now(self::LOCAL_TIMEZONE)->startOfDay();
         $todayEarned = (clone $salesQuery)->where('occurred_at', '>=', $todayStart)->sum('amount_copper');
         $todaySpent = (clone $purchasesQuery)->where('occurred_at', '>=', $todayStart)->sum(DB::raw('abs(amount_copper)'));
 
