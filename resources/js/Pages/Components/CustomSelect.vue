@@ -17,8 +17,9 @@ const query = ref('')
 
 const filteredOptions = computed(() => {
   if (!query.value.trim()) return props.options
+  const q = query.value.toLowerCase()
   return props.options.filter(option =>
-    option.toLowerCase().includes(query.value.toLowerCase())
+    String(option ?? '').toLowerCase().includes(q)
   )
 })
 
