@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
+import { Head } from '@inertiajs/vue3'
 import { Gavel, Boxes, Wallet } from '@lucide/vue'
 import Layout from './Layout.vue'
 import ItemCard from './Components/ItemCard.vue';
@@ -72,6 +73,7 @@ watch(activeTab, (value) => {
 </script>
 
 <template>
+    <Head title="Auction Terminal — Market Analytics" />
     <Layout :realms="realms" :last-synced-at="lastSyncedAt">
         <main class="flex flex-col mt-5 items-center justify-center gap-5 w-[90vw] mx-auto">
             <div class="flex items-center gap-1 self-start rounded-xl border border-white/10 bg-[#12142b] p-1">

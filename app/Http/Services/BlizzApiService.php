@@ -630,12 +630,128 @@ class BlizzApiService
         return Cache::get("auctions_last_modified:{$connectedRealmId}");
     }
 
-        public function getRealmPriceComparison(array $itemsWithIlvl, array $realmSlugs, bool $force = false): array
+    protected function syncRealmsToDbParallel(array $realmSlugs, bool $force = false): array
     {
-        $realmMeta = collect($realmSlugs)->mapWithKeys(function ($slug) use ($force) {
-            $this->syncAuctionsToDb($slug, $force);
-            return [$slug => $this->getConnectedRealmId($slug)];
+        $token = $this->getAccessToken();
+
+        $connectedRealmIds = collect($realmSlugs)->mapWithKeys(
+            fn($slug) => [$slug => $this->getConnectedRealmId($slug)]
+        );
+
+        $locks = $connectedRealmIds->mapWithKeys(function ($connectedRealmId) {
+            return [$connectedRealmId => Cache::lock("sync_lock:{$connectedRealmId}", 30)];
         });
+
+        foreach ($locks as $connectedRealmId => $lock) {
+            if (!$lock->get()) {
+                $lock->block(30);
+            }
+        }
+
+        try {
+            $lastModifiedByRealm = $connectedRealmIds->mapWithKeys(
+                fn($connectedRealmId) => [$connectedRealmId => Cache::get("auctions_last_modified:{$connectedRealmId}")]
+            );
+
+            // descarga TODOS los reinos en paralelo (una sola espera de red,
+            // en vez de una espera secuencial por cada uno)
+            $responses = Http::pool(fn($pool) => $connectedRealmIds->map(function ($connectedRealmId) use ($pool, $token, $force, $lastModifiedByRealm) {
+                $request = $pool->as($connectedRealmId)->withToken($token)->timeout(60);
+
+                if (!$force && ($lastModified = $lastModifiedByRealm[$connectedRealmId])) {
+                    $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
+                }
+
+                return $request->get(
+                    "https://{$this->region}.api.blizzard.com/data/wow/connected-realm/{$connectedRealmId}/auctions",
+                    ['namespace' => "dynamic-{$this->region}", 'locale' => 'es_MX']
+                );
+            })->all());
+
+            ini_set('memory_limit', '1024M');
+
+            $results = [];
+
+            foreach ($connectedRealmIds as $slug => $connectedRealmId) {
+                $response = $responses[$connectedRealmId] ?? null;
+
+                if (!$response instanceof \Illuminate\Http\Client\Response) {
+                    $results[$slug] = ['updated' => false, 'connected_realm_id' => $connectedRealmId, 'error' => true];
+                    continue;
+                }
+
+                if ($response->status() === 304) {
+                    $results[$slug] = ['updated' => false, 'connected_realm_id' => $connectedRealmId];
+                    continue;
+                }
+
+                $auctions = $response->json('auctions', []);
+                $totalAuctions = count($auctions);
+
+                DB::transaction(function () use ($connectedRealmId, &$auctions) {
+                    Auction::where('connected_realm_id', $connectedRealmId)->delete();
+
+                    $now = now();
+                    $rows = [];
+
+                    foreach ($auctions as $a) {
+                        $rows[] = [
+                            'connected_realm_id' => $connectedRealmId,
+                            'blizzard_auction_id' => $a['id'],
+                            'item_id' => $a['item']['id'],
+                            'bonus_lists' => json_encode($a['item']['bonus_lists'] ?? []),
+                            'modifiers' => json_encode($a['item']['modifiers'] ?? []),
+                            'buyout' => $a['buyout'] ?? null,
+                            'bid' => $a['bid'] ?? null,
+                            'unit_price' => $a['unit_price'] ?? null,
+                            'quantity' => $a['quantity'] ?? 1,
+                            'time_left' => $a['time_left'] ?? null,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+
+                        if (count($rows) >= 1000) {
+                            Auction::upsert(
+                                $rows,
+                                ['connected_realm_id', 'blizzard_auction_id'],
+                                ['item_id', 'bonus_lists', 'modifiers', 'buyout', 'bid', 'unit_price', 'quantity', 'time_left', 'updated_at']
+                            );
+                            $rows = [];
+                        }
+                    }
+
+                    if (!empty($rows)) {
+                        Auction::upsert(
+                            $rows,
+                            ['connected_realm_id', 'blizzard_auction_id'],
+                            ['item_id', 'bonus_lists', 'modifiers', 'buyout', 'bid', 'unit_price', 'quantity', 'time_left', 'updated_at']
+                        );
+                    }
+
+                    $auctions = null;
+                });
+
+                Cache::put("auctions_last_modified:{$connectedRealmId}", $response->header('Last-Modified'), now()->addDay());
+                $this->savePriceHistorySnapshot($connectedRealmId);
+
+                $results[$slug] = ['updated' => true, 'connected_realm_id' => $connectedRealmId, 'count' => $totalAuctions];
+            }
+
+            return $results;
+        } finally {
+            foreach ($locks as $lock) {
+                $lock->release();
+            }
+        }
+    }
+
+    public function getRealmPriceComparison(array $itemsWithIlvl, array $realmSlugs, bool $force = false): array
+    {
+        $this->syncRealmsToDbParallel($realmSlugs, $force);
+
+        $realmMeta = collect($realmSlugs)->mapWithKeys(
+            fn($slug) => [$slug => $this->getConnectedRealmId($slug)]
+        );
 
         $lastSynced = $realmMeta->mapWithKeys(fn($connectedRealmId, $slug) => [
             $slug => $this->getLastSyncedAt($connectedRealmId),

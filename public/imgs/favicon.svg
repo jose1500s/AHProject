@@ -1,0 +1,16 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#12142b"/>
+      <stop offset="100%" stop-color="#0b0d1f"/>
+    </linearGradient>
+    <linearGradient id="letterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bgGrad)" stroke="#818cf8" stroke-opacity="0.35" stroke-width="1.5"/>
+
+  <text x="32" y="44" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="30" text-anchor="middle" fill="url(#letterGrad)">AT</text>
+</svg>
