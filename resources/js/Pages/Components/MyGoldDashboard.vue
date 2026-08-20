@@ -1,17 +1,24 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag } from '@lucide/vue'
+import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag, X } from '@lucide/vue'
 import CoinAmount from './CoinAmount.vue'
 
 const CHARACTER_STORAGE_KEY = 'mygold_selected_character'
+const HIDDEN_CHARACTERS_KEY = 'mygold_hidden_characters'
 
 const characters = ref([])
 const warband = ref(null)
 const selectedCharacter = ref(null)
+const hiddenCharacterKeys = ref(new Set())
 
 if (typeof window !== 'undefined') {
     try {
         selectedCharacter.value = localStorage.getItem(CHARACTER_STORAGE_KEY) || null
+    } catch {}
+
+    try {
+        const storedHidden = localStorage.getItem(HIDDEN_CHARACTERS_KEY)
+        if (storedHidden) hiddenCharacterKeys.value = new Set(JSON.parse(storedHidden))
     } catch {}
 }
 
@@ -136,8 +143,28 @@ function selectCharacter(key) {
     characterMenuOpen.value = false
 }
 
+function hideCharacter(key, event) {
+    event.stopPropagation()
+
+    const next = new Set(hiddenCharacterKeys.value)
+    next.add(key)
+    hiddenCharacterKeys.value = next
+
+    try {
+        localStorage.setItem(HIDDEN_CHARACTERS_KEY, JSON.stringify([...next]))
+    } catch {}
+
+    if (selectedCharacter.value === key) {
+        selectedCharacter.value = null
+    }
+}
+
 const currentCharacter = computed(() =>
     characters.value.find(c => c.key === selectedCharacter.value) ?? null
+)
+
+const visibleCharacters = computed(() =>
+    characters.value.filter(c => !hiddenCharacterKeys.value.has(c.key))
 )
 
 function normalizeText(str) {
@@ -275,18 +302,24 @@ const QUALITY_BAR_COLORS = {
                         :class="!selectedCharacter ? 'text-indigo-300' : 'text-slate-300'">
                         Todos los personajes
                     </button>
-                    <button v-for="c in characters" :key="c.key" type="button" @click="selectCharacter(c.key)"
+                    <div v-for="c in visibleCharacters" :key="c.key"
                         class="flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-white/5"
                         :class="selectedCharacter === c.key ? 'text-indigo-300' : 'text-slate-300'">
-                        <img v-if="c.class_icon" :src="c.class_icon" class="size-5 rounded" />
-                        <span class="flex-1 text-left">
-                            <span :class="CLASS_COLORS[c.class] ?? 'text-slate-300'" class="font-medium">{{ c.name }}</span>
-                            <span class="text-slate-500"> · {{ c.realm }}</span>
-                        </span>
-                        <span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
-                            {{ formatCompactGold(c.gold.gold) }}<span class="size-2 rounded-full bg-amber-400"></span>
-                        </span>
-                    </button>
+                        <button type="button" @click="selectCharacter(c.key)" class="flex flex-1 items-center gap-2 text-left">
+                            <img v-if="c.class_icon" :src="c.class_icon" class="size-5 rounded" />
+                            <span class="flex-1 text-left">
+                                <span :class="CLASS_COLORS[c.class] ?? 'text-slate-300'" class="font-medium">{{ c.name }}</span>
+                                <span class="text-slate-500"> · {{ c.realm }}</span>
+                            </span>
+                            <span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
+                                {{ formatCompactGold(c.gold.gold) }}<span class="size-2 rounded-full bg-amber-400"></span>
+                            </span>
+                        </button>
+                        <button type="button" @click="hideCharacter(c.key, $event)"
+                            class="shrink-0 rounded p-1 text-slate-600 hover:bg-white/10 hover:text-red-400">
+                            <X class="size-3.5" />
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -503,7 +536,7 @@ const QUALITY_BAR_COLORS = {
                 {{ salesByItem.length ? 'Sin resultados' : 'Aún no hay ventas registradas' }}
             </div>
 
-            <div v-else class="app-scroll flex max-h-[32rem] flex-col overflow-y-auto pr-1">
+            <div v-else class="app-scroll flex max-h-128 flex-col overflow-y-auto pr-1">
                 <div v-for="item in filteredSalesByItem" :key="item.item_name" class="border-b border-white/5 last:border-b-0">
                     <button type="button" @click="toggleSalesItem(item.item_name)"
                         class="flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-white/5">
