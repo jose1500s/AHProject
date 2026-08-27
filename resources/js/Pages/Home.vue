@@ -134,7 +134,7 @@ watch(activeTab, (value) => {
             </div>
 
             <div v-show="activeTab === 'commodities'" class="w-full">
-                <CommoditiesGrid @syncing="commoditiesSyncing = $event" />
+                <CommoditiesGrid />
             </div>
 
              <div v-show="activeTab === 'mygold'" class="w-full">
