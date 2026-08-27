@@ -3,13 +3,21 @@ import { router } from '@inertiajs/vue3'
 
 const props = defineProps({
   links: { type: Array, required: true },
+  mode: { type: String, default: 'inertia' },
+  only: { type: Array, default: () => ['auctions'] },
 })
+const emit = defineEmits(['navigate'])
 
 function go(url) {
   if (!url) return
 
+  if (props.mode === 'callback') {
+    emit('navigate', url)
+    return
+  }
+
   router.get(url, {}, {
-    only: ['auctions'], // solo repide auctions, no realms ni nada más
+    only: props.only,
     preserveState: true,
     preserveScroll: true,
   })

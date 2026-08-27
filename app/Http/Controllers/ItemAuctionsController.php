@@ -40,4 +40,23 @@ class ItemAuctionsController extends Controller
             'variants' => $blizzard->getItemIlvlVariants($itemId),
         ]);
     }
+
+
+    public function priceHistory(int $itemId, Request $request, BlizzApiService $blizzard)
+    {
+        $realmSlug = $request->query('realm', 'illidan');
+        $ilvl = $request->query('ilvl');
+        $days = (int) $request->query('days', 30);
+
+        $connectedRealmId = $blizzard->getConnectedRealmId($realmSlug);
+
+        return response()->json([
+            'history' => $blizzard->getItemPriceHistory(
+                $connectedRealmId,
+                $itemId,
+                $ilvl !== null ? (int) $ilvl : null,
+                $days
+            ),
+        ]);
+    }
 }

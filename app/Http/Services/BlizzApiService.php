@@ -8,6 +8,8 @@ use App\Models\Item;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Auction;
 use App\Models\PriceHistory;
+use App\Models\CommodityAuction;
+use App\Models\CommodityPriceHistory;
 use Illuminate\Support\Facades\DB;
 use App\Models\ItemLevelLookup;
 
@@ -127,7 +129,7 @@ class BlizzApiService
         );
 
         return collect($responses)
-            ->filter(fn($r) => $r instanceof \Illuminate\Http\Client\Response && $r->ok()) // <- cambio aquí
+            ->filter(fn($r) => $r instanceof \Illuminate\Http\Client\Response && $r->ok())
             ->map(fn($r) => [
                 'blizzard_id' => $r->json('id'),
                 'name' => $r->json('name'),
@@ -197,24 +199,19 @@ class BlizzApiService
         int $limit = 5000,
         ?\Illuminate\Console\Command $command = null
     ): array {
-        // Obtener todos los IDs únicos de las auctions
         $uniqueIds = $this->getUniqueItemIds($auctions);
 
-        // Buscar cuáles de esos IDs ya existen en la bd
         $existingIds = Item::whereIn('blizzard_id', $uniqueIds)
             ->pluck('blizzard_id')
             ->all();
 
-        // Eliminar de la lista todos los IDs que ya existen
         $missingIds = array_values(
             array_diff($uniqueIds, $existingIds)
         );
         $missingIds = array_values(array_diff($missingIds, $this->knownMissingItemIds));
 
-        // Aplicar el límite del batch
         $batch = array_slice($missingIds, 0, $limit);
 
-        // Mostrar información en consola
         if ($command) {
             $command->info(
                 "IDs únicos encontrados: " . count($uniqueIds)
@@ -240,7 +237,6 @@ class BlizzApiService
             $command->newLine();
         }
 
-        // No hay nada nuevo que procesar
         if (empty($batch)) {
             return [
                 'processed' => 0,
@@ -250,27 +246,22 @@ class BlizzApiService
             ];
         }
 
-        // Iniciar barra de progreso
         if ($command) {
             $command->getOutput()->progressStart(count($batch));
         }
 
-        // Procesar en grupos de 75
         collect($batch)
             ->chunk(75)
             ->each(function ($chunk) use ($command) {
 
-                // Obtener información de los items desde Blizzard
                 $items = $this->getItemsBulk(
                     $chunk->all()
                 );
 
-                // Obtener información de los iconos
                 $mediaMap = $this->getItemMediaBulk(
                     $chunk->all()
                 );
 
-                // Guardar items en PostgreSQL
                 foreach ($items as $item) {
 
                     $item['icon_url'] = $this->downloadAndStoreIcon(
@@ -285,14 +276,12 @@ class BlizzApiService
                         $item
                     );
 
-                    // Actualizar barra de progreso
                     if ($command) {
                         $command->getOutput()->progressAdvance();
                     }
                 }
             });
 
-        // Terminar barra de progreso
         if ($command) {
             $command->getOutput()->progressFinish();
             $command->newLine();
@@ -418,26 +407,143 @@ class BlizzApiService
 
     protected function savePriceHistorySnapshot(int $connectedRealmId): void
     {
-        $snapshot = DB::table('auctions')
+        $rows = DB::table('auctions')
             ->select(
                 'item_id',
-                DB::raw('MIN(COALESCE(buyout, unit_price)) as min_price_copper'),
-                DB::raw('COUNT(*) as listings'),
-                DB::raw('SUM(quantity) as volume')
+                DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                DB::raw('bonus_lists::text as bonus_signature_raw'),
+                DB::raw('modifiers::text as modifiers_raw'),
+                'quantity'
             )
             ->where('connected_realm_id', $connectedRealmId)
-            ->groupBy('item_id')
+            ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        $lookups = ItemLevelLookup::whereIn('item_id', $rows->pluck('item_id')->unique())
             ->get()
-            ->map(fn($row) => [
-                'connected_realm_id' => $connectedRealmId,
-                'item_id' => $row->item_id,
-                'min_price_copper' => $row->min_price_copper,
-                'listings' => $row->listings,
-                'volume' => $row->volume,
-                'snapshot_at' => now(),
-            ]);
+            ->groupBy('item_id')
+            ->map(fn($group) => $group->pluck('raw_ilvl', 'bonus_signature'));
+
+        $now = now();
+
+        $snapshot = $rows
+            ->map(function ($row) use ($lookups) {
+                $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+                sort($bonusIds);
+                $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+                [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+                $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+                return [
+                    'item_id' => $row->item_id,
+                    'ilvl' => $lookups[$row->item_id][$signature] ?? null,
+                    'price_copper' => (int) $row->price_copper,
+                    'quantity' => $row->quantity,
+                ];
+            })
+            ->groupBy(fn($r) => $r['item_id'] . '::' . ($r['ilvl'] ?? 'null'))
+            ->map(function ($group) use ($connectedRealmId, $now) {
+                $first = $group->first();
+
+                return [
+                    'connected_realm_id' => $connectedRealmId,
+                    'item_id' => $first['item_id'],
+                    'ilvl' => $first['ilvl'],
+                    'min_price_copper' => $group->min('price_copper'),
+                    'listings' => $group->count(),
+                    'volume' => $group->sum('quantity'),
+                    'snapshot_at' => $now,
+                ];
+            })
+            ->values();
 
         $snapshot->chunk(1000)->each(fn($chunk) => PriceHistory::insert($chunk->all()));
+    }
+
+    public function getItemPriceHistory(int $connectedRealmId, int $itemId, ?int $ilvl, int $days = 30): array
+    {
+        $query = DB::table('price_history')
+            ->select('snapshot_at', 'min_price_copper', 'listings')
+            ->where('connected_realm_id', $connectedRealmId)
+            ->where('item_id', $itemId)
+            ->where('snapshot_at', '>=', now()->subDays($days))
+            ->orderBy('snapshot_at');
+
+        if ($ilvl === null) {
+            $query->whereNull('ilvl');
+        } else {
+            $query->where('ilvl', $ilvl);
+        }
+
+        $history = $query->get()
+            ->map(fn($row) => [
+                'snapshot_at' => $row->snapshot_at,
+                'price_gold' => round($row->min_price_copper / 10000, 2),
+                'listings' => $row->listings,
+            ]);
+
+        $live = $this->getLiveIlvlPrice($connectedRealmId, $itemId, $ilvl);
+
+        if ($live !== null) {
+            $lastSaved = $history->last();
+            $isDuplicate = $lastSaved && abs(now()->diffInMinutes($lastSaved['snapshot_at'])) < 5;
+
+            if (!$isDuplicate) {
+                $history->push([
+                    'snapshot_at' => now(),
+                    'price_gold' => $live['price_gold'],
+                    'listings' => $live['listings'],
+                ]);
+            }
+        }
+
+        return $history->values()->all();
+    }
+
+    protected function getLiveIlvlPrice(int $connectedRealmId, int $itemId, ?int $ilvl): ?array
+    {
+        $rows = DB::table('auctions')
+            ->select(
+                DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                DB::raw('bonus_lists::text as bonus_signature_raw'),
+                DB::raw('modifiers::text as modifiers_raw')
+            )
+            ->where('connected_realm_id', $connectedRealmId)
+            ->where('item_id', $itemId)
+            ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        $lookups = ItemLevelLookup::where('item_id', $itemId)->pluck('raw_ilvl', 'bonus_signature');
+
+        $matching = $rows->map(function ($row) use ($lookups) {
+            $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+            sort($bonusIds);
+            $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+            [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+            $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+            return [
+                'ilvl' => $lookups[$signature] ?? null,
+                'price_copper' => (int) $row->price_copper,
+            ];
+        })->filter(fn($r) => $r['ilvl'] === $ilvl);
+
+        if ($matching->isEmpty()) {
+            return null;
+        }
+
+        return [
+            'price_gold' => round($matching->min('price_copper') / 10000, 2),
+            'listings' => $matching->count(),
+        ];
     }
 
     public function getAuctionListings(int $connectedRealmId, ?string $search = null, int $perPage = 24)
@@ -502,7 +608,6 @@ class BlizzApiService
             ];
         });
 
-        // agrupa por item_level; dentro de cada grupo, ordena por precio ascendente
         return $flat->groupBy('item_level')
             ->map(function ($group, $ilvl) {
                 $sorted = $group->sortBy('price_copper')->values();
@@ -525,12 +630,128 @@ class BlizzApiService
         return Cache::get("auctions_last_modified:{$connectedRealmId}");
     }
 
+    protected function syncRealmsToDbParallel(array $realmSlugs, bool $force = false): array
+    {
+        $token = $this->getAccessToken();
+
+        $connectedRealmIds = collect($realmSlugs)->mapWithKeys(
+            fn($slug) => [$slug => $this->getConnectedRealmId($slug)]
+        );
+
+        $locks = $connectedRealmIds->mapWithKeys(function ($connectedRealmId) {
+            return [$connectedRealmId => Cache::lock("sync_lock:{$connectedRealmId}", 30)];
+        });
+
+        foreach ($locks as $connectedRealmId => $lock) {
+            if (!$lock->get()) {
+                $lock->block(30);
+            }
+        }
+
+        try {
+            $lastModifiedByRealm = $connectedRealmIds->mapWithKeys(
+                fn($connectedRealmId) => [$connectedRealmId => Cache::get("auctions_last_modified:{$connectedRealmId}")]
+            );
+
+            // descarga TODOS los reinos en paralelo (una sola espera de red,
+            // en vez de una espera secuencial por cada uno)
+            $responses = Http::pool(fn($pool) => $connectedRealmIds->map(function ($connectedRealmId) use ($pool, $token, $force, $lastModifiedByRealm) {
+                $request = $pool->as($connectedRealmId)->withToken($token)->timeout(60);
+
+                if (!$force && ($lastModified = $lastModifiedByRealm[$connectedRealmId])) {
+                    $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
+                }
+
+                return $request->get(
+                    "https://{$this->region}.api.blizzard.com/data/wow/connected-realm/{$connectedRealmId}/auctions",
+                    ['namespace' => "dynamic-{$this->region}", 'locale' => 'es_MX']
+                );
+            })->all());
+
+            ini_set('memory_limit', '1024M');
+
+            $results = [];
+
+            foreach ($connectedRealmIds as $slug => $connectedRealmId) {
+                $response = $responses[$connectedRealmId] ?? null;
+
+                if (!$response instanceof \Illuminate\Http\Client\Response) {
+                    $results[$slug] = ['updated' => false, 'connected_realm_id' => $connectedRealmId, 'error' => true];
+                    continue;
+                }
+
+                if ($response->status() === 304) {
+                    $results[$slug] = ['updated' => false, 'connected_realm_id' => $connectedRealmId];
+                    continue;
+                }
+
+                $auctions = $response->json('auctions', []);
+                $totalAuctions = count($auctions);
+
+                DB::transaction(function () use ($connectedRealmId, &$auctions) {
+                    Auction::where('connected_realm_id', $connectedRealmId)->delete();
+
+                    $now = now();
+                    $rows = [];
+
+                    foreach ($auctions as $a) {
+                        $rows[] = [
+                            'connected_realm_id' => $connectedRealmId,
+                            'blizzard_auction_id' => $a['id'],
+                            'item_id' => $a['item']['id'],
+                            'bonus_lists' => json_encode($a['item']['bonus_lists'] ?? []),
+                            'modifiers' => json_encode($a['item']['modifiers'] ?? []),
+                            'buyout' => $a['buyout'] ?? null,
+                            'bid' => $a['bid'] ?? null,
+                            'unit_price' => $a['unit_price'] ?? null,
+                            'quantity' => $a['quantity'] ?? 1,
+                            'time_left' => $a['time_left'] ?? null,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+
+                        if (count($rows) >= 1000) {
+                            Auction::upsert(
+                                $rows,
+                                ['connected_realm_id', 'blizzard_auction_id'],
+                                ['item_id', 'bonus_lists', 'modifiers', 'buyout', 'bid', 'unit_price', 'quantity', 'time_left', 'updated_at']
+                            );
+                            $rows = [];
+                        }
+                    }
+
+                    if (!empty($rows)) {
+                        Auction::upsert(
+                            $rows,
+                            ['connected_realm_id', 'blizzard_auction_id'],
+                            ['item_id', 'bonus_lists', 'modifiers', 'buyout', 'bid', 'unit_price', 'quantity', 'time_left', 'updated_at']
+                        );
+                    }
+
+                    $auctions = null;
+                });
+
+                Cache::put("auctions_last_modified:{$connectedRealmId}", $response->header('Last-Modified'), now()->addDay());
+                $this->savePriceHistorySnapshot($connectedRealmId);
+
+                $results[$slug] = ['updated' => true, 'connected_realm_id' => $connectedRealmId, 'count' => $totalAuctions];
+            }
+
+            return $results;
+        } finally {
+            foreach ($locks as $lock) {
+                $lock->release();
+            }
+        }
+    }
+
     public function getRealmPriceComparison(array $itemsWithIlvl, array $realmSlugs, bool $force = false): array
     {
-        $realmMeta = collect($realmSlugs)->mapWithKeys(function ($slug) use ($force) {
-            $this->syncAuctionsToDb($slug, $force);
-            return [$slug => $this->getConnectedRealmId($slug)];
-        });
+        $this->syncRealmsToDbParallel($realmSlugs, $force);
+
+        $realmMeta = collect($realmSlugs)->mapWithKeys(
+            fn($slug) => [$slug => $this->getConnectedRealmId($slug)]
+        );
 
         $lastSynced = $realmMeta->mapWithKeys(fn($connectedRealmId, $slug) => [
             $slug => $this->getLastSyncedAt($connectedRealmId),
@@ -539,32 +760,52 @@ class BlizzApiService
         $itemIds = collect($itemsWithIlvl)->pluck('item_id')->unique()->values();
         $itemsModel = Item::whereIn('blizzard_id', $itemIds)->get()->keyBy('blizzard_id');
 
-        $rows = collect($itemsWithIlvl)->map(function ($entry) use ($realmMeta, $itemsModel) {
+        // una sola consulta trae TODOS los lookups de ilvl para TODOS los ítems pedidos,
+        // en vez de una consulta separada por cada ítem dentro del loop
+        $lookupsByItem = ItemLevelLookup::whereIn('item_id', $itemIds)
+            ->get()
+            ->groupBy('item_id')
+            ->map(fn($group) => $group->pluck('raw_ilvl', 'bonus_signature'));
+
+        $connectedRealmIds = $realmMeta->values()->unique()->values();
+
+        // una sola consulta por reino trae TODAS las auctions de TODOS los ítems pedidos
+        // a la vez (whereIn), en vez de N consultas (una por ítem) por cada reino
+        $auctionsByRealmAndItem = $connectedRealmIds->mapWithKeys(function ($connectedRealmId) use ($itemIds) {
+            $rows = DB::table('auctions')
+                ->select(
+                    'item_id',
+                    DB::raw('COALESCE(buyout, unit_price) as price_copper'),
+                    DB::raw('bonus_lists::text as bonus_signature_raw'),
+                    DB::raw('modifiers::text as modifiers_raw')
+                )
+                ->where('connected_realm_id', $connectedRealmId)
+                ->whereIn('item_id', $itemIds)
+                ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
+                ->get()
+                ->groupBy('item_id');
+
+            return [$connectedRealmId => $rows];
+        });
+
+        $rows = collect($itemsWithIlvl)->map(function ($entry) use ($realmMeta, $itemsModel, $lookupsByItem, $auctionsByRealmAndItem) {
             $itemId = (int) $entry['item_id'];
             $targetIlvl = $entry['ilvl'] !== null ? (int) $entry['ilvl'] : null;
             $item = $itemsModel[$itemId] ?? null;
-            $lookups = ItemLevelLookup::where('item_id', $itemId)->pluck('raw_ilvl', 'bonus_signature');
+            $lookups = $lookupsByItem[$itemId] ?? collect();
 
-            $pricesByRealm = $realmMeta->mapWithKeys(function ($connectedRealmId, $slug) use ($itemId, $targetIlvl, $lookups) {
-                $auctions = DB::table('auctions')
-                    ->select(
-                        DB::raw('COALESCE(buyout, unit_price) as price_copper'),
-                        DB::raw('bonus_lists::text as bonus_signature_raw'),
-                        DB::raw('modifiers::text as modifiers_raw')
-                    )
-                    ->where('connected_realm_id', $connectedRealmId)
-                    ->where('item_id', $itemId)
-                    ->whereNotNull(DB::raw('COALESCE(buyout, unit_price)'))
-                    ->get()
-                    ->map(function ($row) use ($lookups) {
-                        $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
-                        sort($bonusIds);
-                        $modifiers = json_decode($row->modifiers_raw, true) ?: [];
-                        [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
-                        $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+            $pricesByRealm = $realmMeta->mapWithKeys(function ($connectedRealmId, $slug) use ($itemId, $targetIlvl, $lookups, $auctionsByRealmAndItem) {
+                $rawRows = $auctionsByRealmAndItem[$connectedRealmId][$itemId] ?? collect();
 
-                        return ['ilvl' => $lookups[$signature] ?? null, 'price_copper' => (int) $row->price_copper];
-                    });
+                $auctions = $rawRows->map(function ($row) use ($lookups) {
+                    $bonusIds = json_decode($row->bonus_signature_raw, true) ?: [];
+                    sort($bonusIds);
+                    $modifiers = json_decode($row->modifiers_raw, true) ?: [];
+                    [$playerLevel, $contentTuningId] = self::extractScalingModifiers($modifiers);
+                    $signature = implode(',', $bonusIds) . "|p{$playerLevel}|c{$contentTuningId}";
+
+                    return ['ilvl' => $lookups[$signature] ?? null, 'price_copper' => (int) $row->price_copper];
+                });
 
                 $matching = $targetIlvl === null ? $auctions : $auctions->filter(fn($r) => $r['ilvl'] === $targetIlvl);
                 $matching = $matching->sortBy('price_copper')->values();
@@ -624,7 +865,7 @@ class BlizzApiService
                 'cheapest' => self::copperToGsc($group->min('price_copper')),
                 'auction_count' => $group->count(),
             ])
-            ->sortByDesc(fn($v) => $v['ilvl'] ?? -1) // los "sin ilvl" quedan al final
+            ->sortByDesc(fn($v) => $v['ilvl'] ?? -1)
             ->values()->all();
     }
 
@@ -724,7 +965,6 @@ class BlizzApiService
             $path = "icons/{$itemId}.jpg";
             $response = $responses[$itemId] ?? null;
 
-
             if ($response instanceof \Illuminate\Http\Client\Response && $response->ok()) {
                 Storage::disk('public')->put($path, $response->body());
                 $results[$itemId] = $path;
@@ -734,5 +974,183 @@ class BlizzApiService
         }
 
         return $results;
+    }
+
+    public function syncCommoditiesToDb(bool $force = false): array
+    {
+        $lock = Cache::lock('sync_lock:commodities', 60);
+
+        if (!$lock->get()) {
+            $lock->block(60);
+            return ['updated' => false, 'skipped_concurrent' => true];
+        }
+
+        try {
+            $lastModifiedKey = 'commodities_last_modified';
+
+            ini_set('memory_limit', '1024M');
+
+            $request = Http::withToken($this->getAccessToken())->timeout(90);
+
+            if (!$force && ($lastModified = Cache::get($lastModifiedKey))) {
+                $request = $request->withHeaders(['If-Modified-Since' => $lastModified]);
+            }
+
+            $response = $request->get(
+                "https://{$this->region}.api.blizzard.com/data/wow/auctions/commodities",
+                ['namespace' => "dynamic-{$this->region}", 'locale' => 'es_MX']
+            );
+
+            if ($response->status() === 304) {
+                return ['updated' => false];
+            }
+
+            $auctions = $response->json('auctions', []);
+            $totalAuctions = count($auctions);
+
+            DB::transaction(function () use (&$auctions) {
+                CommodityAuction::truncate();
+
+                $now = now();
+                $rows = [];
+
+                foreach ($auctions as $a) {
+                    $rows[] = [
+                        'blizzard_auction_id' => $a['id'],
+                        'item_id' => $a['item']['id'],
+                        'quantity' => $a['quantity'] ?? 1,
+                        'unit_price' => $a['unit_price'] ?? 0,
+                        'time_left' => $a['time_left'] ?? null,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+
+                    if (count($rows) >= 1000) {
+                        CommodityAuction::upsert(
+                            $rows,
+                            ['blizzard_auction_id'],
+                            ['item_id', 'quantity', 'unit_price', 'time_left', 'updated_at']
+                        );
+                        $rows = [];
+                    }
+                }
+
+                if (!empty($rows)) {
+                    CommodityAuction::upsert(
+                        $rows,
+                        ['blizzard_auction_id'],
+                        ['item_id', 'quantity', 'unit_price', 'time_left', 'updated_at']
+                    );
+                }
+
+                $auctions = null;
+            });
+
+            Cache::put($lastModifiedKey, $response->header('Last-Modified'), now()->addDay());
+
+            $this->saveCommodityPriceHistorySnapshot();
+
+            return ['updated' => true, 'count' => $totalAuctions];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function saveCommodityPriceHistorySnapshot(): void
+    {
+        $snapshot = DB::table('commodity_auctions')
+            ->select(
+                'item_id',
+                DB::raw('MIN(unit_price) as min_price_copper'),
+                DB::raw('COUNT(*) as listings'),
+                DB::raw('SUM(quantity) as volume')
+            )
+            ->groupBy('item_id')
+            ->get()
+            ->map(fn($row) => [
+                'item_id' => $row->item_id,
+                'min_price_copper' => $row->min_price_copper,
+                'listings' => $row->listings,
+                'volume' => $row->volume,
+                'snapshot_at' => now(),
+            ]);
+
+        $snapshot->chunk(1000)->each(fn($chunk) => CommodityPriceHistory::insert($chunk->all()));
+    }
+
+    public function getCommodityListings(?string $search = null, int $perPage = 24)
+    {
+        return DB::table('commodity_auctions')
+            ->join('items', 'items.blizzard_id', '=', 'commodity_auctions.item_id')
+            ->select(
+                'items.blizzard_id as item_id',
+                'items.name',
+                'items.quality',
+                'items.item_class',
+                'items.item_subclass',
+                'items.icon_url',
+                DB::raw('MIN(commodity_auctions.unit_price) as min_price_copper'),
+                DB::raw('COUNT(*) as listings'),
+                DB::raw('SUM(commodity_auctions.quantity) as volume')
+            )
+            ->when($search, fn($q) => $q->where('items.name', 'ilike', "%{$search}%"))
+            ->groupBy('items.blizzard_id', 'items.name', 'items.quality', 'items.item_class', 'items.item_subclass', 'items.icon_url')
+            ->orderBy('items.name')
+            ->paginate($perPage)
+            ->withQueryString();
+    }
+
+    public function getCommodityLastSyncedAt(): ?string
+    {
+        return Cache::get('commodities_last_modified');
+    }
+
+    public function getCommodityPriceHistory(int $itemId, int $days = 30): array
+    {
+        $history = DB::table('commodity_price_history')
+            ->select('snapshot_at', 'min_price_copper', 'listings')
+            ->where('item_id', $itemId)
+            ->where('snapshot_at', '>=', now()->subDays($days))
+            ->orderBy('snapshot_at')
+            ->get()
+            ->map(fn($row) => [
+                'snapshot_at' => $row->snapshot_at,
+                'price_gold' => round($row->min_price_copper / 10000, 2),
+                'listings' => $row->listings,
+            ]);
+
+        $live = $this->getLiveCommodityPrice($itemId);
+
+        if ($live !== null) {
+            $lastSaved = $history->last();
+            $isDuplicate = $lastSaved && abs(now()->diffInMinutes($lastSaved['snapshot_at'])) < 5;
+
+            if (!$isDuplicate) {
+                $history->push([
+                    'snapshot_at' => now(),
+                    'price_gold' => $live['price_gold'],
+                    'listings' => $live['listings'],
+                ]);
+            }
+        }
+
+        return $history->values()->all();
+    }
+
+    protected function getLiveCommodityPrice(int $itemId): ?array
+    {
+        $row = DB::table('commodity_auctions')
+            ->where('item_id', $itemId)
+            ->selectRaw('MIN(unit_price) as min_price, COUNT(*) as listings')
+            ->first();
+
+        if (!$row || $row->min_price === null) {
+            return null;
+        }
+
+        return [
+            'price_gold' => round($row->min_price / 10000, 2),
+            'listings' => $row->listings,
+        ];
     }
 }

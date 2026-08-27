@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue'
-import { router, Link } from '@inertiajs/vue3'
+import { router } from '@inertiajs/vue3'
 import { Loader2 } from '@lucide/vue'
 import InputText from './Components/InputText.vue';
 import CustomSelect from './Components/CustomSelect.vue';

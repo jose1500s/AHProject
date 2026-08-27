@@ -112,7 +112,14 @@ function toggleFavorite(row) {
 }
 
 function openItemDetail(row) {
-    emit('select-item', { itemId: row.item_id, ilvl: row.ilvl })
+    emit('select-item', {
+        itemId: row.item_id,
+        ilvl: row.ilvl,
+        realms: selectedRealms.value.map(slug => ({
+            slug,
+            name: props.realms.find(r => r.slug === slug)?.name ?? slug,
+        })),
+    })
 }
 
 const sortedRows = computed(() => {
