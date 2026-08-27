@@ -13,6 +13,7 @@ const mounted = ref(false)
 const now = ref(Date.now())
 
 let tickInterval = null
+let syncCheckInterval = null
 
 async function fetchCommodities(url = null) {
     loading.value = true
@@ -24,6 +25,20 @@ async function fetchCommodities(url = null) {
         lastSyncedAt.value = data.lastSyncedAt
     } finally {
         loading.value = false
+    }
+}
+
+async function checkForNewSync() {
+    try {
+        const target = `/api/commodities${search.value ? `?search=${encodeURIComponent(search.value)}` : ''}`
+        const res = await fetch(target)
+        const data = await res.json()
+
+        if (data.lastSyncedAt !== lastSyncedAt.value) {
+            commodities.value = data.commodities
+            lastSyncedAt.value = data.lastSyncedAt
+        }
+    } catch (e) {
     }
 }
 
@@ -40,10 +55,15 @@ onMounted(() => {
     tickInterval = setInterval(() => {
         now.value = Date.now()
     }, 30000)
+
+    syncCheckInterval = setInterval(() => {
+        checkForNewSync()
+    }, 60000)
 })
 
 onUnmounted(() => {
     if (tickInterval) clearInterval(tickInterval)
+    if (syncCheckInterval) clearInterval(syncCheckInterval)
 })
 
 function formatLastSync(dateStr) {
@@ -54,10 +74,20 @@ function formatLastSync(dateStr) {
     if (diffMinutes < 60) return `hace ${diffMinutes}m`
 
     const diffHours = Math.floor(diffMinutes / 60)
-    if (diffHours < 24) return `hace ${diffHours}h`
+    const remainingMinutes = diffMinutes % 60
+
+    if (diffHours < 24) {
+        return remainingMinutes > 0
+            ? `hace ${diffHours}h ${remainingMinutes}m`
+            : `hace ${diffHours}h`
+    }
 
     const diffDays = Math.floor(diffHours / 24)
-    return `hace ${diffDays} día${diffDays === 1 ? '' : 's'}`
+    const remainingHours = diffHours % 24
+
+    return remainingHours > 0
+        ? `hace ${diffDays} día${diffDays === 1 ? '' : 's'} ${remainingHours}h`
+        : `hace ${diffDays} día${diffDays === 1 ? '' : 's'}`
 }
 
 function openDetail(id) {

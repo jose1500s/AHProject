@@ -3,42 +3,54 @@
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// sync principal de commodities: cada hora + 5 minutos de margen
-Schedule::command('commodities:sync')
-    ->cron('5 * * * *')
-    ->name('commodities-sync-main')
-    ->withoutOverlapping();
-
-// reintento adaptativo: si el sync principal (o el reintento anterior) no trajo cambios, se vuelve a intentar 20 min después. Se checa cada minuto pero solo actúa si el intento anterior fue "sin cambios" y ya pasaron esos 20 min.
 Schedule::call(function () {
-    $hadChanges = Cache::get('commodities_last_sync_had_changes');
-
-    if ($hadChanges !== false) {
-        return;
-    }
-
-    $lastAttempt = Cache::get('commodities_retry_attempted_at');
+    $nowCdmx = now('America/Mexico_City');
     $now = now();
 
-    if ($lastAttempt && $now->diffInMinutes($lastAttempt) < 20) {
-        return;
+    $lastCheckTimestamp = Cache::get('commodities_last_check_timestamp');
+    $hadChanges = Cache::get('commodities_last_sync_had_changes');
+
+    if ($lastCheckTimestamp) {
+        $elapsedMinutes = intdiv($now->timestamp - $lastCheckTimestamp, 60);
+
+        if ($hadChanges === true && $elapsedMinutes < 55) {
+            Log::info('[commodities-sync] skip: ya sincronizado recientemente', [
+                'hora_cdmx' => $nowCdmx->format('Y-m-d H:i:s'),
+                'elapsedMinutes' => $elapsedMinutes,
+            ]);
+            return;
+        }
+
+        if ($hadChanges === false && $elapsedMinutes < 5) {
+            Log::info('[commodities-sync] skip: esperando ventana de reintento', [
+                'hora_cdmx' => $nowCdmx->format('Y-m-d H:i:s'),
+                'elapsedMinutes' => $elapsedMinutes,
+            ]);
+            return;
+        }
     }
 
-    if ($lastAttempt) {
-        Cache::forget('commodities_last_sync_had_changes');
-        Cache::forget('commodities_retry_attempted_at');
-        return;
-    }
+    Cache::put('commodities_last_check_timestamp', $now->timestamp, now()->addDay());
 
-    Cache::put('commodities_retry_attempted_at', $now, now()->addHours(2));
+    Log::info('[commodities-sync] sincronizando ahora', [
+        'hora_cdmx' => $nowCdmx->format('Y-m-d H:i:s'),
+    ]);
+
     Artisan::call('commodities:sync');
+
+    Log::info('[commodities-sync] resultado', [
+        'hora_cdmx' => now('America/Mexico_City')->format('Y-m-d H:i:s'),
+        'had_changes' => Cache::get('commodities_last_sync_had_changes'),
+        'last_modified' => Cache::get('commodities_last_modified'),
+    ]);
 })
     ->everyMinute()
-    ->name('commodities-sync-retry')
+    ->name('commodities-sync')
     ->withoutOverlapping();
