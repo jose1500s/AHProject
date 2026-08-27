@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Http\Services\BlizzApiService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class SyncCommodities extends Command
@@ -19,6 +20,8 @@ class SyncCommodities extends Command
 
         if (!$result['updated']) {
             $this->info('Sin cambios (304) o sync concurrente en progreso.');
+            // decida si vale la pena reintentar en 20 min
+            Cache::put('commodities_last_sync_had_changes', false, now()->addHours(2));
             return self::SUCCESS;
         }
 
@@ -30,6 +33,8 @@ class SyncCommodities extends Command
 
         $this->info('Sincronizando catálogo de ítems nuevos...');
         $blizzard->syncItemsBatch($fakeAuctions, (int) $this->option('limit'), $this);
+
+        Cache::put('commodities_last_sync_had_changes', true, now()->addHours(2));
 
         return self::SUCCESS;
     }
