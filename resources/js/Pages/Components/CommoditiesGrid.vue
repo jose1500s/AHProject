@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import ItemCard from './ItemCard.vue'
 import Pagination from './Pagination.vue'
 import CommodityDetailModal from './CommodityDetailModal.vue'
@@ -10,6 +10,9 @@ const lastSyncedAt = ref(null)
 const loading = ref(false)
 const selectedItemId = ref(null)
 const mounted = ref(false)
+const now = ref(Date.now())
+
+let tickInterval = null
 
 async function fetchCommodities(url = null) {
     loading.value = true
@@ -33,12 +36,20 @@ watch(search, () => {
 onMounted(() => {
     mounted.value = true
     fetchCommodities()
+
+    tickInterval = setInterval(() => {
+        now.value = Date.now()
+    }, 30000)
+})
+
+onUnmounted(() => {
+    if (tickInterval) clearInterval(tickInterval)
 })
 
 function formatLastSync(dateStr) {
     if (!dateStr) return 'nunca'
 
-    const diffMinutes = Math.floor((Date.now() - new Date(dateStr)) / 60000)
+    const diffMinutes = Math.floor((now.value - new Date(dateStr)) / 60000)
     if (diffMinutes < 1) return 'ahora'
     if (diffMinutes < 60) return `hace ${diffMinutes}m`
 
