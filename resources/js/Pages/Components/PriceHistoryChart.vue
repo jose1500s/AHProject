@@ -38,6 +38,18 @@ function buildUrl(realmSlug) {
     return `/items/${props.itemId}/price-history?${params}`
 }
 
+function sortAndDedupeHistory(history) {
+    const byTimestamp = new Map()
+
+    for (const row of history) {
+        byTimestamp.set(row.snapshot_at, row)
+    }
+
+    return [...byTimestamp.values()].sort(
+        (a, b) => new Date(a.snapshot_at).getTime() - new Date(b.snapshot_at).getTime()
+    )
+}
+
 async function fetchHistory() {
     if (!props.realms.length) {
         results.value = []
@@ -50,7 +62,7 @@ async function fetchHistory() {
             const res = await fetch(buildUrl(realm.slug))
             const data = await res.json()
 
-            return { slug: realm.slug, name: realm.name, history: data.history }
+            return { slug: realm.slug, name: realm.name, history: sortAndDedupeHistory(data.history) }
         }))
 
         results.value = fetched
@@ -72,10 +84,31 @@ const priceSeries = computed(() => results.value.map(r => ({
     data: r.history.map(row => [new Date(row.snapshot_at).getTime(), row.price_gold]),
 })))
 
-const volumeSeries = computed(() => results.value.map(r => ({
-    name: r.name,
-    data: r.history.map(row => [new Date(row.snapshot_at).getTime(), row.listings]),
-})))
+function formatCategoryLabel(snapshotAt) {
+    const date = new Date(snapshotAt)
+    return date.toLocaleString('es-MX', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    })
+}
+
+const allTimestamps = computed(() => {
+    const set = new Set()
+    results.value.forEach(r => r.history.forEach(h => set.add(h.snapshot_at)))
+    return [...set].sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
+})
+
+const volumeCategories = computed(() => allTimestamps.value.map(formatCategoryLabel))
+
+const volumeSeries = computed(() => results.value.map(r => {
+    const byTimestamp = new Map(r.history.map(h => [h.snapshot_at, h.listings]))
+    return {
+        name: r.name,
+        data: allTimestamps.value.map(ts => byTimestamp.get(ts) ?? 0),
+    }
+}))
 
 const trends = computed(() => results.value.map((r, i) => {
     if (r.history.length < 2) return { name: r.name, color: colors.value[i], trend: null }
@@ -200,7 +233,7 @@ const volumeChartOptions = computed(() => ({
     colors: colors.value,
     plotOptions: {
         bar: {
-            columnWidth: '85%',
+            columnWidth: '60%',
             barHeight: '100%',
             borderRadius: 3,
         },
@@ -213,10 +246,17 @@ const volumeChartOptions = computed(() => ({
         padding: { left: 8, right: 8 },
     },
     xaxis: {
-        type: 'datetime',
-        labels: { style: { colors: '#64748b', fontSize: '10px' } },
+        type: 'category',
+        categories: volumeCategories.value,
+        labels: {
+            style: { colors: '#64748b', fontSize: '10px' },
+            rotate: -45,
+            trim: true,
+            hideOverlappingLabels: true,
+        },
         axisBorder: { show: false },
         axisTicks: { show: false },
+        tickAmount: Math.min(8, volumeCategories.value.length || 1),
     },
     yaxis: {
         labels: {
@@ -228,7 +268,6 @@ const volumeChartOptions = computed(() => ({
         theme: 'dark',
         shared: false,
         intersect: true,
-        x: { format: 'dd MMM HH:mm' },
         y: { formatter: (val) => val === undefined || val === null ? '—' : `${val} auctions` },
     },
 }))
