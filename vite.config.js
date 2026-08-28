@@ -12,11 +12,29 @@ export default defineConfig({
         }),
         tailwindcss(),
         vue(),
-        inertia()
+        inertia({
+            ssr: false,
+        })
     ],
     server: {
         watch: {
             ignored: ['**/storage/framework/views/**'],
         },
+        warmup: {
+            clientFiles: [
+                './resources/js/app.js',
+                './resources/js/Pages/Home.vue',
+                './resources/js/Pages/Layout.vue',
+                './resources/js/Pages/Components/*.vue',
+            ],
+        },
+    },
+    ssr: {
+        noExternal: ['@lucide/vue'],
+        external: ['apexcharts', 'vue3-apexcharts'],
+    },
+    optimizeDeps: {
+        include: ['@inertiajs/vue3', '@lucide/vue'],
+        exclude: ['apexcharts', 'vue3-apexcharts'],
     },
 });
