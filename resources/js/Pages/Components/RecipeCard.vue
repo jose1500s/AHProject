@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { ref, computed } from 'vue'
 import { TrendingUp, TrendingDown } from '@lucide/vue'
 import CoinAmount from './CoinAmount.vue'
 
@@ -66,7 +66,7 @@ function reagentHasHighQuality(reagent) {
 </script>
 
 <template>
-    <div class="rounded-xl border border-white/10 bg-white/3 p-4">
+    <div class="rounded-xl border border-white/10 bg-[#141224]/90 backdrop-blur-xl p-4">
         <div class="flex items-start justify-between gap-4">
             <button
                 type="button"
@@ -120,10 +120,9 @@ function reagentHasHighQuality(reagent) {
                 type="button"
                 class="flex flex-col items-start gap-1 rounded-lg border px-2 py-1.5 text-xs transition"
                 :class="ignoredItemIds.has(reagent.item_id)
-                    ? 'border-white/5 bg-white/2 text-slate-600 line-through'
-                    : 'border-white/10 bg-white/5 text-slate-300 hover:border-indigo-400/40'"
+                    ? 'border-white/5 bg-white/5 text-slate-600 line-through'
+                    : 'border-white/10 bg-white/10 text-slate-300 hover:border-indigo-400/40'"
                 @click="emit('toggle-ignore', reagent.item_id)"
-                @click.right.prevent="emit('open-item', reagent.item_id)"
             >
                 <div class="flex items-center gap-1.5">
                     <img v-if="reagent.icon_url" :src="reagent.icon_url" class="h-4 w-4 rounded" />
@@ -141,11 +140,11 @@ function reagentHasHighQuality(reagent) {
         </div>
 
         <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="rounded-lg border border-white/5 bg-white/2 p-3">
+            <div class="rounded-lg border border-white/5 bg-white/5 p-3">
                 <div class="text-[11px] uppercase tracking-wide text-slate-500">Costo mats</div>
                 <CoinAmount v-bind="costGsc" class="mt-1" />
             </div>
-            <div class="rounded-lg border border-white/5 bg-white/2 p-3">
+            <div class="rounded-lg border border-white/5 bg-white/5 p-3">
                 <div class="text-[11px] uppercase tracking-wide text-slate-500">Venta estim.</div>
                 <CoinAmount v-bind="sellGsc" class="mt-1" />
             </div>
@@ -158,7 +157,7 @@ function reagentHasHighQuality(reagent) {
                 </div>
                 <CoinAmount v-bind="profitGsc" class="mt-1" />
             </div>
-            <div class="rounded-lg border border-white/5 bg-white/2 p-3">
+            <div class="rounded-lg border border-white/5 bg-white/5 p-3">
                 <div class="text-[11px] uppercase tracking-wide text-slate-500">Fuente</div>
                 <div class="mt-1 text-sm text-slate-400">Auction House</div>
             </div>
