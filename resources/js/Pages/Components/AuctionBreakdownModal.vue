@@ -16,7 +16,7 @@ const item = ref(null)
 const realmName = ref('')
 const groups = ref([])
 const loading = ref(false)
-const expandedIlvl = ref(null)
+const expandedGroupKey = ref(null)
 
 watch(() => props.itemId, async (id) => {
   if (!id) return
@@ -24,7 +24,7 @@ watch(() => props.itemId, async (id) => {
   loading.value = true
   item.value = null
   groups.value = []
-  expandedIlvl.value = null
+  expandedGroupKey.value = null
 
   try {
     const res = await fetch(`/items/${id}/auctions?realm=${props.realmSlug}`)
@@ -47,8 +47,13 @@ const chartRealms = computed(() => {
   return [{ slug: props.realmSlug, name: realmName.value || props.realmSlug }]
 })
 
-function toggleGroup(ilvl) {
-  expandedIlvl.value = expandedIlvl.value === ilvl ? null : ilvl
+function groupKey(group) {
+  return group.item_level === null ? '__null__' : group.item_level
+}
+
+function toggleGroup(group) {
+  const key = groupKey(group)
+  expandedGroupKey.value = expandedGroupKey.value === key ? null : key
 }
 
 const QUALITY_COLORS = {
@@ -93,8 +98,8 @@ const QUALITY_COLORS = {
           <div v-else-if="!displayGroups.length" class="px-5 py-6 text-center text-sm text-slate-500">Sin subastas activas
           </div>
 
-          <div v-for="group in displayGroups" :key="group.item_level ?? 'sin-nivel'" class="border-b border-white/5">
-            <button type="button" @click="toggleGroup(group.item_level)"
+          <div v-for="group in displayGroups" :key="groupKey(group)" class="border-b border-white/5">
+            <button type="button" @click="toggleGroup(group)"
               class="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-white/5">
               <div class="flex items-center gap-3">
                 <span class="w-10 text-xs font-semibold text-slate-400">{{ group.item_level ?? '—' }}</span>
@@ -116,11 +121,11 @@ const QUALITY_COLORS = {
               <div class="flex items-center gap-2 text-xs text-slate-500">
                 <span>{{ group.total_auctions }} auctions</span>
                 <ChevronDown class="size-4 transition-transform duration-200"
-                  :class="{ 'rotate-180': expandedIlvl === group.item_level }" />
+                  :class="{ 'rotate-180': expandedGroupKey === groupKey(group) }" />
               </div>
             </button>
 
-            <div v-if="expandedIlvl === group.item_level" class="bg-white/2 px-5 py-2">
+            <div v-if="expandedGroupKey === groupKey(group)" class="bg-white/2 px-5 py-2">
               <div v-for="(row, i) in group.rows" :key="i" class="flex items-center justify-between py-1.5 text-xs">
                 <span class="inline-flex items-center gap-1">
                   <span v-if="row.gold" class="inline-flex items-center gap-0.5 text-amber-400">

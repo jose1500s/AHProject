@@ -5,6 +5,5 @@ import '../css/app.css'
 createInertiaApp({
     withApp(app) {
         app.use(VueApexCharts)
-        app.component('apexchart', VueApexCharts)
     },
 })

@@ -159,7 +159,7 @@ const QUALITY_COLORS = {
 </script>
 
 <template>
-    <section class="rounded-2xl border border-white/10 bg-[#12142b] p-5 w-full">
+    <section class="rounded-2xl border border-white/10 bg-[#12142b]/55 backdrop-blur-xl p-5 w-full">
         <div class="mb-4 flex items-center justify-between">
             <h2 class="flex items-center gap-2 text-sm font-bold text-slate-100">
                 <GitCompare class="size-4 text-indigo-400" />
@@ -182,7 +182,7 @@ const QUALITY_COLORS = {
         </div>
 
         <div v-if="selectedItems.length && selectedRealms.length"
-            class="mt-3 overflow-x-auto rounded-xl border border-white/5">
+            class="mt-3 overflow-x-auto rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-md">
             <table class="w-full text-sm">
                 <thead class="bg-white/2 text-[11px] uppercase tracking-wider text-slate-500">
                     <tr>

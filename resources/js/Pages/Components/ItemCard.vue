@@ -24,8 +24,8 @@ defineProps({
 </script>
 
 <template>
-  <div class="flex w-full items-center gap-2.5 rounded-lg border border-white/10 bg-[#141224] px-2.5 py-2
-           transition-colors hover:cursor-pointer hover:border-white/20">
+  <div class="flex w-full items-center gap-2.5 rounded-lg border border-white/10 bg-[#141224]/55 backdrop-blur-xl px-2.5 py-2
+           transition-colors hover:cursor-pointer hover:border-white/20 hover:bg-[#141224]/70">
     <div class="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border"
       :class="[QUALITY_STYLES[quality].border, QUALITY_STYLES[quality].bg]">
       <img v-if="typeof icon === 'string' && icon" :src="icon" class="size-full object-cover" />

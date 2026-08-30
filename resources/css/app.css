@@ -11,6 +11,22 @@
 body {
     background-color: #020617;
     color: #F8FAFC;
+    position: relative;
+    min-height: 100vh;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(120, 180, 255, 0.25), transparent 70%), #000000;
+}
+
+#app {
+    position: relative;
+    z-index: 1;
 }
 
 input:-webkit-autofill,

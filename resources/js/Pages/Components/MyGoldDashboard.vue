@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag, X } from '@lucide/vue'
+import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag, X, Vault } from '@lucide/vue'
 import CoinAmount from './CoinAmount.vue'
 
 const CHARACTER_STORAGE_KEY = 'mygold_selected_character'
@@ -331,7 +331,7 @@ const QUALITY_BAR_COLORS = {
             </button>
         </div>
 
-        <!-- header con oro actual -->
+        <!-- header con oro actual (personaje especifico) -->
         <div v-if="currentCharacter" class="flex items-center justify-between rounded-2xl border border-white/10 bg-[#12142b] p-5">
             <div class="flex items-center gap-4">
                 <img v-if="currentCharacter.class_icon" :src="currentCharacter.class_icon"
@@ -352,6 +352,47 @@ const QUALITY_BAR_COLORS = {
                     :copper="currentCharacter.gold.copper"
                     size="text-xl"
                 />
+            </div>
+        </div>
+
+        <!-- vista consolidada: oro combinado + warband -->
+        <div v-else-if="overview" class="grid grid-cols-2 gap-4">
+            <div class="flex items-center justify-between rounded-2xl border border-white/10 bg-[#12142b] p-5">
+                <div class="flex items-center gap-3">
+                    <div class="flex size-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-300">
+                        <Wallet class="size-6" />
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-100">Oro combinado</h2>
+                        <p class="text-xs text-slate-500">{{ visibleCharacters.length }} personajes</p>
+                    </div>
+                </div>
+                <CoinAmount
+                    :gold="overview.current_gold.gold"
+                    :silver="overview.current_gold.silver"
+                    :copper="overview.current_gold.copper"
+                    size="text-xl"
+                />
+            </div>
+
+            <div class="flex items-center justify-between rounded-2xl border border-white/10 bg-[#12142b] p-5">
+                <div class="flex items-center gap-3">
+                    <div class="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
+                        <Vault class="size-6" />
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-100">Warband</h2>
+                        <p class="text-xs text-slate-500">Banco de cuenta</p>
+                    </div>
+                </div>
+                <CoinAmount
+                    v-if="warband"
+                    :gold="warband.gold"
+                    :silver="warband.silver"
+                    :copper="warband.copper"
+                    size="text-xl"
+                />
+                <span v-else class="text-sm text-slate-500">—</span>
             </div>
         </div>
 
