@@ -9,6 +9,7 @@ use App\Http\Controllers\CommodityController;
 use App\Http\Controllers\WowSyncController;
 use App\Http\Controllers\WowDashboardController;
 use App\Http\Controllers\BestCraftsController;
+use App\Http\Controllers\WowCraftHistoryController;
 
 Route::get('/', [Main::class, 'Home']);
 Route::get('/items/{itemId}/auctions', [ItemAuctionsController::class, 'show']);
@@ -31,3 +32,4 @@ Route::get('/api/wow/sales-by-item', [WowDashboardController::class, 'salesByIte
 
 Route::get('/api/crafts', [BestCraftsController::class, 'list']);
 Route::get('/api/professions', [BestCraftsController::class, 'professions']);
+Route::get('/api/wow/craft-history', [WowCraftHistoryController::class, 'index']);

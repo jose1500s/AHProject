@@ -8,6 +8,9 @@ use App\Models\WowAuctionTransaction;
 use App\Models\WowPostFee;
 use App\Models\WowActiveAuction;
 use App\Models\WowCharacterInventory;
+use App\Models\WowCharacterConcentration;
+use App\Models\WowCharacterVault;
+use App\Models\WowCraftHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -27,6 +30,7 @@ class WowSyncController extends Controller
         $warbandIn = $payload['warband'] ?? null;
         $transactionsIn = $payload['auctionTransactions'] ?? [];
         $feesIn = $payload['postFees'] ?? [];
+        $craftHistoryIn = $payload['craftHistory'] ?? [];
 
         $summary = [
             'characters' => 0,
@@ -34,9 +38,10 @@ class WowSyncController extends Controller
             'fees_new' => 0,
             'active_auctions' => 0,
             'inventory_items' => 0,
+            'crafts_new' => 0,
         ];
 
-        DB::transaction(function () use ($charactersIn, $warbandIn, $transactionsIn, $feesIn, &$summary) {
+        DB::transaction(function () use ($charactersIn, $warbandIn, $transactionsIn, $feesIn, $craftHistoryIn, &$summary) {
             foreach ($charactersIn as $characterKey => $char) {
                 WowCharacter::updateOrCreate(
                     ['character_key' => $characterKey],
@@ -111,6 +116,63 @@ class WowSyncController extends Controller
                     );
                     $summary['inventory_items'] += count($inventoryRows);
                 }
+
+                $concentration = $char['concentration'] ?? [];
+                if (is_array($concentration) && !empty($concentration)) {
+                    $rows = collect($concentration)->map(fn($data, $profession) => [
+                        'character_key' => $characterKey,
+                        'profession' => $profession,
+                        'currency_id' => $data['currencyID'] ?? 0,
+                        'quantity' => $data['quantity'] ?? 0,
+                        'max_quantity' => $data['maxQuantity'] ?? 0,
+                        'synced_at' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ])->values()->all();
+
+                    if (!empty($rows)) {
+                        WowCharacterConcentration::upsert(
+                            $rows,
+                            ['character_key', 'profession'],
+                            ['currency_id', 'quantity', 'max_quantity', 'synced_at', 'updated_at']
+                        );
+                    }
+                }
+
+                $vault = $char['vault'] ?? [];
+                if (is_array($vault) && !empty($vault)) {
+                    $rows = [];
+
+                    foreach (['raid', 'dungeon', 'world'] as $category) {
+                        $slots = $vault[$category] ?? [];
+                        if (!is_array($slots)) {
+                            continue;
+                        }
+
+                        foreach ($slots as $i => $slot) {
+                            $rows[] = [
+                                'character_key' => $characterKey,
+                                'category' => $category,
+                                'slot_index' => $slot['index'] ?? $i,
+                                'threshold' => $slot['threshold'] ?? 0,
+                                'progress' => $slot['progress'] ?? 0,
+                                'unlocked' => $slot['unlocked'] ?? false,
+                                'level' => $slot['level'] ?? null,
+                                'synced_at' => now(),
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+                        }
+                    }
+
+                    if (!empty($rows)) {
+                        WowCharacterVault::upsert(
+                            $rows,
+                            ['character_key', 'category', 'slot_index'],
+                            ['threshold', 'progress', 'unlocked', 'level', 'synced_at', 'updated_at']
+                        );
+                    }
+                }
             }
 
             if ($warbandIn) {
@@ -181,6 +243,39 @@ class WowSyncController extends Controller
 
                     $afterCount = WowPostFee::count();
                     $summary['fees_new'] = $afterCount - $beforeCount;
+                }
+            }
+
+            if (is_array($craftHistoryIn) && !empty($craftHistoryIn)) {
+                $rows = collect($craftHistoryIn)->map(fn($craft) => [
+                    'character_key' => $craft['character'] ?? '',
+                    'source_id' => $craft['id'] ?? null,
+                    'item_id' => $craft['itemID'] ?? 0,
+                    'quantity' => $craft['quantity'] ?? 1,
+                    'multicraft' => $craft['multicraft'] ?? 0,
+                    'concentration_spent' => $craft['concentrationSpent'] ?? 0,
+                    'concentration_currency_id' => $craft['concentrationCurrencyID'] ?? null,
+                    'crafting_quality' => $craft['craftingQuality'] ?? null,
+                    'is_crit' => $craft['isCrit'] ?? false,
+                    'first_craft_reward' => $craft['firstCraftReward'] ?? false,
+                    'occurred_at' => isset($craft['timestamp'])
+                        ? now()->createFromTimestamp($craft['timestamp'])
+                        : now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ])->filter(fn($row) => $row['source_id'] !== null && $row['character_key'] !== '')->values()->all();
+
+                if (!empty($rows)) {
+                    $beforeCount = WowCraftHistory::count();
+
+                    WowCraftHistory::upsert(
+                        $rows,
+                        ['character_key', 'source_id'],
+                        ['item_id', 'quantity', 'multicraft', 'concentration_spent', 'concentration_currency_id', 'crafting_quality', 'is_crit', 'first_craft_reward', 'occurred_at', 'updated_at']
+                    );
+
+                    $afterCount = WowCraftHistory::count();
+                    $summary['crafts_new'] = $afterCount - $beforeCount;
                 }
             }
         });
