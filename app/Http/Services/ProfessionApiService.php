@@ -57,6 +57,21 @@ class ProfessionApiService
         return $response->json();
     }
 
+    public function getProfessionMedia(int $professionId): ?string
+    {
+        $response = Http::withToken($this->getAccessToken())
+            ->get("https://{$this->region}.api.blizzard.com/data/wow/media/profession/{$professionId}", [
+                'namespace' => "static-{$this->region}",
+                'locale' => 'es_MX',
+            ]);
+
+        if (!$response->ok()) {
+            return null;
+        }
+
+        return collect($response->json('assets', []))->firstWhere('key', 'icon')['value'] ?? null;
+    }
+
     public function getSkillTierRecipes(int $professionId, int $skillTierId): array
     {
         $response = Http::withToken($this->getAccessToken())
@@ -140,9 +155,14 @@ class ProfessionApiService
         $count = 0;
 
         foreach ($professions as $p) {
+            $iconUrl = $this->getProfessionMedia($p['id']);
+
             Profession::updateOrCreate(
                 ['blizzard_id' => $p['id']],
-                ['name' => $p['name']]
+                [
+                    'name' => $p['name'],
+                    'icon_url' => $iconUrl,
+                ]
             );
             $count++;
         }
@@ -198,7 +218,10 @@ class ProfessionApiService
             foreach ($chunk as $recipeId) {
                 $detail = $this->getRecipeDetail($recipeId, 'es_MX');
 
-                if (!$detail || empty($detail['reagents'])) {
+                $hasFixedReagents = !empty($detail['reagents']);
+                $hasModifiedSlots = !empty($detail['modified_crafting_slots']);
+
+                if (!$detail || (!$hasFixedReagents && !$hasModifiedSlots)) {
                     $skipped++;
                     if ($command) {
                         $command->getOutput()->progressAdvance();
@@ -216,7 +239,7 @@ class ProfessionApiService
 
                 $producesItemIdHigh = null;
 
-                if ($producesItemId === null && !empty($detail['modified_crafting_slots']) && $nameEn) {
+                if ($producesItemId === null && $nameEn) {
                     $ids = $this->resolveItemIdsByExactName($nameEn);
                     if (!empty($ids)) {
                         $producesItemId = $ids[0];
@@ -257,7 +280,7 @@ class ProfessionApiService
 
                 RecipeReagent::where('recipe_id', $recipe->id)->delete();
 
-                $reagentRows = collect($detail['reagents'])->map(fn($r) => [
+                $reagentRows = collect($detail['reagents'] ?? [])->map(fn($r) => [
                     'recipe_id' => $recipe->id,
                     'item_id' => $r['reagent']['id'],
                     'quantity' => $r['quantity'],

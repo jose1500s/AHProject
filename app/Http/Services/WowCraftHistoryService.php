@@ -2,7 +2,9 @@
 
 namespace App\Http\Services;
 
+use App\Models\Item;
 use App\Models\Recipe;
+use App\Models\WowCharacter;
 use App\Models\WowCraftHistory;
 use Illuminate\Support\Carbon;
 
@@ -14,30 +16,34 @@ class WowCraftHistoryService
     ) {
     }
 
-    public function getHistory(
-        string $characterKey,
+    public function getHistoryAll(
         Carbon $from,
         Carbon $to,
         string $realmSlug
     ): array {
         $connectedRealmId = $this->blizzApiService->getConnectedRealmId($realmSlug);
 
-        $crafts = WowCraftHistory::where('character_key', $characterKey)
-            ->whereBetween('occurred_at', [$from, $to])
+        $crafts = WowCraftHistory::whereBetween('occurred_at', [$from, $to])
             ->orderByDesc('occurred_at')
             ->get();
 
-        $recipesByProducesId = Recipe::whereNotNull('produces_item_id')
+        $characterNames = WowCharacter::pluck('name', 'character_key');
+
+        $recipesByProducesId = Recipe::with('profession')
+            ->whereNotNull('produces_item_id')
             ->get()
             ->keyBy('produces_item_id');
 
-        $recipesByProducesHighId = Recipe::whereNotNull('produces_item_id_high')
+        $recipesByProducesHighId = Recipe::with('profession')
+            ->whereNotNull('produces_item_id_high')
             ->get()
             ->keyBy('produces_item_id_high');
 
+        $itemIcons = Item::whereIn('blizzard_id', $crafts->pluck('item_id')->unique())
+            ->pluck('icon_url', 'blizzard_id');
+
         $totalConcentrationSpent = 0;
         $totalRevenue = 0;
-        $totalCost = 0;
         $entries = [];
 
         foreach ($crafts as $craft) {
@@ -46,26 +52,32 @@ class WowCraftHistoryService
 
             $totalConcentrationSpent += $craft->concentration_spent;
 
+            [$realm, $charName] = array_pad(explode('-', $craft->character_key, 2), 2, null);
+            $characterName = $characterNames->get($craft->character_key) ?? $charName ?? $craft->character_key;
+
+            $itemIconUrl = $itemIcons->get($craft->item_id);
+
             if (!$recipe) {
                 $entries[] = [
                     'craft_id' => $craft->id,
+                    'character_key' => $craft->character_key,
+                    'character_name' => $characterName,
                     'item_id' => $craft->item_id,
                     'item_name' => null,
-                    'icon_url' => null,
+                    'icon_url' => $itemIconUrl,
+                    'profession' => null,
                     'quantity' => $craft->quantity,
                     'multicraft' => $craft->multicraft,
                     'concentration_spent' => $craft->concentration_spent,
                     'crafting_quality' => $craft->crafting_quality,
                     'occurred_at' => $craft->occurred_at->toIso8601String(),
                     'revenue_copper' => 0,
-                    'cost_copper' => 0,
-                    'profit_copper' => 0,
                     'resolved' => false,
                 ];
                 continue;
             }
 
-            $isHighVariant = $recipe->produces_item_id_high === $craft->item_id;
+            $isHighVariant = $craft->crafting_quality >= 2 && $recipe->produces_item_id_high !== null;
 
             $qty = max(1, (int) floor($craft->quantity / max(1, $recipe->produces_quantity)));
 
@@ -77,30 +89,23 @@ class WowCraftHistoryService
 
             $revenue = $sellUnit * $craft->quantity;
 
-            $cost = collect($profit['reagents'])->sum(function ($r) use ($isHighVariant) {
-                $unit = $isHighVariant ? $r['unit_price_high_copper'] : $r['unit_price_low_copper'];
-                return $unit * $r['quantity_needed'];
-            });
-
-            $craftProfit = $revenue - $cost;
-
             $totalRevenue += $revenue;
-            $totalCost += $cost;
 
             $entries[] = [
                 'craft_id' => $craft->id,
+                'character_key' => $craft->character_key,
+                'character_name' => $characterName,
                 'recipe_id' => $recipe->id,
                 'item_id' => $craft->item_id,
                 'item_name' => $recipe->name,
-                'icon_url' => $recipe->icon_url,
+                'icon_url' => $itemIconUrl ?? $recipe->icon_url,
+                'profession' => $recipe->profession->name ?? null,
                 'quantity' => $craft->quantity,
                 'multicraft' => $craft->multicraft,
                 'concentration_spent' => $craft->concentration_spent,
                 'crafting_quality' => $craft->crafting_quality,
                 'occurred_at' => $craft->occurred_at->toIso8601String(),
                 'revenue_copper' => $revenue,
-                'cost_copper' => $cost,
-                'profit_copper' => $craftProfit,
                 'resolved' => true,
             ];
         }
@@ -110,8 +115,6 @@ class WowCraftHistoryService
             'summary' => [
                 'concentration_spent' => $totalConcentrationSpent,
                 'revenue_copper' => $totalRevenue,
-                'cost_copper' => $totalCost,
-                'profit_copper' => $totalRevenue - $totalCost,
                 'crafts_count' => $crafts->count(),
             ],
         ];

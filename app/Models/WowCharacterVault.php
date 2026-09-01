@@ -16,6 +16,7 @@ class WowCharacterVault extends Model
         'progress',
         'unlocked',
         'level',
+        'ilvl',
         'synced_at',
     ];
 

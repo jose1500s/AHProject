@@ -158,6 +158,7 @@ class WowSyncController extends Controller
                                 'progress' => $slot['progress'] ?? 0,
                                 'unlocked' => $slot['unlocked'] ?? false,
                                 'level' => $slot['level'] ?? null,
+                                'ilvl' => $slot['ilvl'] ?? null,
                                 'synced_at' => now(),
                                 'created_at' => now(),
                                 'updated_at' => now(),
@@ -169,7 +170,7 @@ class WowSyncController extends Controller
                         WowCharacterVault::upsert(
                             $rows,
                             ['character_key', 'category', 'slot_index'],
-                            ['threshold', 'progress', 'unlocked', 'level', 'synced_at', 'updated_at']
+                            ['threshold', 'progress', 'unlocked', 'level', 'ilvl', 'synced_at', 'updated_at']
                         );
                     }
                 }
@@ -193,7 +194,8 @@ class WowSyncController extends Controller
                     'source_id' => $tx['id'] ?? null,
                     'type' => $tx['type'] ?? 'sale',
                     'item_name' => $tx['itemName'] ?? 'Desconocido',
-                    'item_id' => null,
+                    'item_id' => $tx['itemID'] ?? null,
+                    'quantity' => $tx['quantity'] ?? 1,
                     'counterparty' => $tx['counterparty'] ?? null,
                     'sale_price_copper' => $tx['salePrice'] ?? 0,
                     'deposit_copper' => $tx['deposit'] ?? 0,
@@ -212,7 +214,7 @@ class WowSyncController extends Controller
                     WowAuctionTransaction::upsert(
                         $rows,
                         ['character_key', 'source_id'],
-                        ['type', 'item_name', 'counterparty', 'sale_price_copper', 'deposit_copper', 'consignment_copper', 'amount_copper', 'occurred_at', 'updated_at']
+                        ['type', 'item_name', 'item_id', 'quantity', 'counterparty', 'sale_price_copper', 'deposit_copper', 'consignment_copper', 'amount_copper', 'occurred_at', 'updated_at']
                     );
 
                     $afterCount = WowAuctionTransaction::count();

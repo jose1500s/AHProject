@@ -8,19 +8,20 @@ use Illuminate\Support\Carbon;
 
 class WowCraftHistoryController extends Controller
 {
+    private const LOCAL_TIMEZONE = 'America/Mexico_City';
+
     public function index(Request $request, WowCraftHistoryService $service)
     {
-        $characterKey = (string) $request->query('character');
         $realmSlug = (string) $request->query('realm_slug');
         $range = (string) $request->query('range', '7d');
 
-        if (!$characterKey || !$realmSlug) {
+        if (!$realmSlug) {
             return response()->json(['entries' => [], 'summary' => null]);
         }
 
         [$from, $to] = $this->resolveRange($range, $request);
 
-        $result = $service->getHistory($characterKey, $from, $to, $realmSlug);
+        $result = $service->getHistoryAll($from, $to, $realmSlug);
 
         return response()->json($result);
     }
@@ -30,18 +31,25 @@ class WowCraftHistoryController extends Controller
         $to = now();
 
         $from = match ($range) {
-            'today' => now()->startOfDay(),
+            'today' => Carbon::now(self::LOCAL_TIMEZONE)->startOfDay()->utc(),
             '1d' => now()->subDay(),
             '7d' => now()->subDays(7),
             '30d' => now()->subDays(30),
-            'custom' => Carbon::parse($request->query('from', now()->subDays(7))),
+            'custom' => Carbon::parse($request->query('from', now()->subDays(7)), self::LOCAL_TIMEZONE)->utc(),
             default => now()->subDays(7),
         };
 
         if ($range === 'custom' && $request->query('to')) {
-            $to = Carbon::parse($request->query('to'));
+            $to = Carbon::parse($request->query('to'), self::LOCAL_TIMEZONE)->utc();
         }
 
         return [$from, $to];
+    }
+
+    public function destroy(int $id)
+    {
+        \App\Models\WowCraftHistory::where('id', $id)->delete();
+
+        return response()->json(['ok' => true]);
     }
 }
