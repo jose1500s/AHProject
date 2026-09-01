@@ -543,7 +543,10 @@ const QUALITY_BAR_COLORS = {
                             <ArrowDown v-else class="size-3.5" />
                         </div>
                         <div class="min-w-0 flex-1">
-                            <p class="truncate text-sm font-medium text-slate-200">{{ tx.item_name }}</p>
+                            <p class="truncate text-sm font-medium text-slate-200">
+                                {{ tx.item_name }}
+                                <span v-if="tx.quantity > 1" class="ml-1 text-xs font-semibold text-slate-500">x{{ tx.quantity }}</span>
+                            </p>
                             <p class="text-xs text-slate-500" :title="formatFullDate(tx.occurred_at)">
                                 {{ timeAgo(tx.occurred_at) }} · {{ formatShortDate(tx.occurred_at) }}
                             </p>

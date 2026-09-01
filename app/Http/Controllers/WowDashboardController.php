@@ -204,6 +204,7 @@ class WowDashboardController extends Controller
                 'item_name' => $meta['name'],
                 'icon_url' => $meta['icon_url'],
                 'item_id' => $tx->item_id,
+                'quantity' => $tx->quantity,
                 'counterparty' => $tx->counterparty,
                 'amount' => $this->formatCoin(abs($tx->amount_copper)),
                 'occurred_at' => $tx->occurred_at,
