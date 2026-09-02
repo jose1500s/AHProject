@@ -10,6 +10,9 @@ use Illuminate\Support\Carbon;
 
 class WowCraftHistoryService
 {
+    private const MIN_TRACKED_LEVEL = 80;
+    private const MAX_TRACKED_LEVEL = 90;
+
     public function __construct(
         protected CraftProfitService $craftProfitService,
         protected BlizzApiService $blizzApiService
@@ -23,7 +26,11 @@ class WowCraftHistoryService
     ): array {
         $connectedRealmId = $this->blizzApiService->getConnectedRealmId($realmSlug);
 
+        $trackedKeys = WowCharacter::whereBetween('level', [self::MIN_TRACKED_LEVEL, self::MAX_TRACKED_LEVEL])
+            ->pluck('character_key');
+
         $crafts = WowCraftHistory::whereBetween('occurred_at', [$from, $to])
+            ->whereIn('character_key', $trackedKeys)
             ->orderByDesc('occurred_at')
             ->get();
 

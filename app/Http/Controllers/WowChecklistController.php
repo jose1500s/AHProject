@@ -10,16 +10,46 @@ use Illuminate\Http\Request;
 
 class WowChecklistController extends Controller
 {
+    private const MIN_TRACKED_LEVEL = 80;
+    private const MAX_TRACKED_LEVEL = 90;
+    private const CONCENTRATION_REGEN_PER_DAY = 250;
+
+    private function trackedCharacterKeys()
+    {
+        return WowCharacter::whereBetween('level', [self::MIN_TRACKED_LEVEL, self::MAX_TRACKED_LEVEL])
+            ->pluck('character_key');
+    }
+
+    private function estimateConcentration(int $quantity, int $maxQuantity, $syncedAt): array
+    {
+        $elapsedSeconds = max(0, now()->getTimestamp() - $syncedAt->getTimestamp());
+        $gained = ($elapsedSeconds / 86400) * self::CONCENTRATION_REGEN_PER_DAY;
+        $estimatedQuantity = min($maxQuantity, (int) floor($quantity + $gained));
+        $isMax = $estimatedQuantity >= $maxQuantity;
+        $percent = $maxQuantity > 0 ? round(($estimatedQuantity / $maxQuantity) * 100) : 0;
+        $etaSeconds = $isMax ? null : (int) round((($maxQuantity - $estimatedQuantity) / self::CONCENTRATION_REGEN_PER_DAY) * 86400);
+
+        return [
+            'estimated_quantity' => $estimatedQuantity,
+            'estimated_percent' => $percent,
+            'is_estimated_max' => $isMax,
+            'eta_seconds' => $etaSeconds,
+        ];
+    }
+
     public function concentrationAll()
     {
         $professionIcons = Profession::pluck('icon_url', 'name');
 
-        $characters = WowCharacter::pluck('name', 'character_key');
+        $trackedKeys = $this->trackedCharacterKeys();
+        $characters = WowCharacter::whereIn('character_key', $trackedKeys)->pluck('name', 'character_key');
 
-        $rows = WowCharacterConcentration::orderBy('profession')
+        $rows = WowCharacterConcentration::whereIn('character_key', $trackedKeys)
+            ->orderBy('profession')
             ->get(['character_key', 'profession', 'quantity', 'max_quantity', 'synced_at'])
             ->map(function ($row) use ($professionIcons, $characters) {
                 [$realm, $name] = explode('-', $row->character_key, 2);
+                $estimate = $this->estimateConcentration($row->quantity, $row->max_quantity, $row->synced_at);
 
                 return [
                     'character_key' => $row->character_key,
@@ -32,6 +62,10 @@ class WowChecklistController extends Controller
                     'percent' => $row->max_quantity > 0 ? round(($row->quantity / $row->max_quantity) * 100) : 0,
                     'is_max' => $row->quantity >= $row->max_quantity,
                     'synced_at' => $row->synced_at->toIso8601String(),
+                    'estimated_quantity' => $estimate['estimated_quantity'],
+                    'estimated_percent' => $estimate['estimated_percent'],
+                    'is_estimated_max' => $estimate['is_estimated_max'],
+                    'eta_seconds' => $estimate['eta_seconds'],
                 ];
             });
 
@@ -43,6 +77,14 @@ class WowChecklistController extends Controller
         $characterKey = (string) $request->query('character');
 
         if (!$characterKey) {
+            return response()->json(['vault' => null]);
+        }
+
+        $isTracked = WowCharacter::where('character_key', $characterKey)
+            ->whereBetween('level', [self::MIN_TRACKED_LEVEL, self::MAX_TRACKED_LEVEL])
+            ->exists();
+
+        if (!$isTracked) {
             return response()->json(['vault' => null]);
         }
 
@@ -91,9 +133,13 @@ class WowChecklistController extends Controller
 
     public function summary()
     {
-        $characters = WowCharacter::get(['character_key', 'name', 'realm', 'last_updated_at']);
+        $characters = WowCharacter::whereBetween('level', [self::MIN_TRACKED_LEVEL, self::MAX_TRACKED_LEVEL])
+            ->get(['character_key', 'name', 'realm', 'last_updated_at']);
 
-        $vaultByCharacter = WowCharacterVault::selectRaw('character_key, SUM(CASE WHEN unlocked THEN 1 ELSE 0 END) as unlocked_count, COUNT(*) as total_slots')
+        $trackedKeys = $characters->pluck('character_key');
+
+        $vaultByCharacter = WowCharacterVault::whereIn('character_key', $trackedKeys)
+            ->selectRaw('character_key, SUM(CASE WHEN unlocked THEN 1 ELSE 0 END) as unlocked_count, COUNT(*) as total_slots')
             ->groupBy('character_key')
             ->get()
             ->keyBy('character_key');

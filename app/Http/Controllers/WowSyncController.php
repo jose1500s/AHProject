@@ -43,6 +43,10 @@ class WowSyncController extends Controller
 
         DB::transaction(function () use ($charactersIn, $warbandIn, $transactionsIn, $feesIn, $craftHistoryIn, &$summary) {
             foreach ($charactersIn as $characterKey => $char) {
+                $characterSyncedAt = isset($char['lastUpdated'])
+                    ? now()->createFromTimestamp($char['lastUpdated'])
+                    : now();
+
                 WowCharacter::updateOrCreate(
                     ['character_key' => $characterKey],
                     [
@@ -52,9 +56,7 @@ class WowSyncController extends Controller
                         'level' => $char['level'] ?? 0,
                         'ilvl' => $char['ilvl'] ?? 0,
                         'gold_copper' => $char['gold'] ?? 0,
-                        'last_updated_at' => isset($char['lastUpdated'])
-                            ? now()->createFromTimestamp($char['lastUpdated'])
-                            : now(),
+                        'last_updated_at' => $characterSyncedAt,
                     ]
                 );
                 $summary['characters']++;
@@ -125,7 +127,7 @@ class WowSyncController extends Controller
                         'currency_id' => $data['currencyID'] ?? 0,
                         'quantity' => $data['quantity'] ?? 0,
                         'max_quantity' => $data['maxQuantity'] ?? 0,
-                        'synced_at' => now(),
+                        'synced_at' => $characterSyncedAt,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ])->values()->all();
@@ -159,7 +161,7 @@ class WowSyncController extends Controller
                                 'unlocked' => $slot['unlocked'] ?? false,
                                 'level' => $slot['level'] ?? null,
                                 'ilvl' => $slot['ilvl'] ?? null,
-                                'synced_at' => now(),
+                                'synced_at' => $characterSyncedAt,
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
