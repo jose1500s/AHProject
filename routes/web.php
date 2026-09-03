@@ -11,6 +11,7 @@ use App\Http\Controllers\WowDashboardController;
 use App\Http\Controllers\BestCraftsController;
 use App\Http\Controllers\WowCraftHistoryController;
 use App\Http\Controllers\WowChecklistController;
+use App\Http\Controllers\CommodityWatchlistController;
 
 Route::get('/', [Main::class, 'Home']);
 Route::get('/items/{itemId}/auctions', [ItemAuctionsController::class, 'show']);
@@ -38,3 +39,10 @@ Route::get('/api/wow/checklist', [WowChecklistController::class, 'overview']);
 Route::get('/api/wow/checklist/concentration', [WowChecklistController::class, 'concentrationAll']);
 Route::get('/api/wow/checklist/summary', [WowChecklistController::class, 'summary']);
 Route::delete('/api/wow/craft-history/{id}', [WowCraftHistoryController::class, 'destroy']);
+
+Route::get('/api/commodities/watchlist', [CommodityWatchlistController::class, 'index']);
+Route::get('/api/commodities/watchlist/search', [CommodityWatchlistController::class, 'search']);
+Route::post('/api/commodities/watchlist', [CommodityWatchlistController::class, 'store']);
+Route::delete('/api/commodities/watchlist/{id}', [CommodityWatchlistController::class, 'destroy']);
+Route::get('/api/commodities/{itemId}/buy-estimate', [CommodityWatchlistController::class, 'buyEstimate']);
+Route::get('/api/commodities/{itemId}/profit-ladder', [CommodityWatchlistController::class, 'profitLadder']);
