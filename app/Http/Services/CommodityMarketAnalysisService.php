@@ -14,7 +14,6 @@ class CommodityMarketAnalysisService
     private const MIN_LISTING_CONSISTENCY = 0.7;
     private const MIN_MOVE_PERCENT = 10;
     private const MIN_CURRENT_PRICE_COPPER = 200000;
-    private const AH_COMMISSION = 0.05;
     private const RECOMMENDATIONS_CACHE_KEY = 'commodity_recommendations';
     private const REBOUNDS_CACHE_KEY = 'commodity_price_rebounds';
     private const BREAKEVEN_DROPS_CACHE_KEY = 'commodity_breakeven_drops';
@@ -23,7 +22,12 @@ class CommodityMarketAnalysisService
 
     public function breakevenPercent(): float
     {
-        return round(((1 / (1 - self::AH_COMMISSION)) - 1) * 100, 2);
+        return round(((1 / (1 - 0.05)) - 1) * 100, 2);
+    }
+
+    protected function effectivePrice($row): int
+    {
+        return (int) ($row->liquid_price_copper ?? $row->min_price_copper);
     }
 
     public function getStats(int $itemId): ?array
@@ -33,14 +37,14 @@ class CommodityMarketAnalysisService
         $rows = CommodityPriceHistory::where('item_id', $itemId)
             ->where('snapshot_at', '>=', $windowStart)
             ->orderBy('snapshot_at')
-            ->get(['min_price_copper', 'listings', 'volume', 'snapshot_at']);
+            ->get(['min_price_copper', 'liquid_price_copper', 'listings', 'volume', 'snapshot_at']);
 
         if ($rows->isEmpty()) {
             return null;
         }
 
-        $current = (int) $rows->last()->min_price_copper;
-        $prices = $rows->pluck('min_price_copper')->map(fn($p) => (int) $p)->sort()->values();
+        $current = $this->effectivePrice($rows->last());
+        $prices = $rows->map(fn($r) => $this->effectivePrice($r))->sort()->values();
 
         $median = $this->percentile($prices, 50);
         $projectionMin = $this->percentile($prices, 5);
@@ -52,7 +56,8 @@ class CommodityMarketAnalysisService
         $snapshotsWithListings = $rows->where('listings', '>', 0)->count();
         $listingConsistency = $totalSnapshots > 0 ? $snapshotsWithListings / $totalSnapshots : 0;
 
-        $price24hAgo = $this->nearestPrice($rows, now()->subHours(24));
+        $price24hAgoRow = $this->nearestRow($rows, now()->subHours(24));
+        $price24hAgo = $price24hAgoRow ? $this->effectivePrice($price24hAgoRow) : null;
         $percentChangeVsYesterday = $price24hAgo
             ? round((($current - $price24hAgo) / $price24hAgo) * 100, 1)
             : 0.0;
@@ -73,13 +78,15 @@ class CommodityMarketAnalysisService
 
         $recentWindowStart = now()->subDays(self::REBOUND_LOOKBACK_DAYS);
         $recentRows = $rows->where('snapshot_at', '>=', $recentWindowStart);
-        $recentMin = $recentRows->isNotEmpty() ? (int) $recentRows->min('min_price_copper') : $current;
+        $recentMin = $recentRows->isNotEmpty()
+            ? $recentRows->map(fn($r) => $this->effectivePrice($r))->min()
+            : $current;
         $reboundPercent = $recentMin > 0
             ? round((($current - $recentMin) / $recentMin) * 100, 1)
             : 0.0;
 
         $previousRow = $rows->count() >= 2 ? $rows->slice(-2, 1)->first() : null;
-        $previousPrice = $previousRow ? (int) $previousRow->min_price_copper : null;
+        $previousPrice = $previousRow ? $this->effectivePrice($previousRow) : null;
         $dropSincePreviousPercent = ($previousPrice && $previousPrice > 0)
             ? round((($previousPrice - $current) / $previousPrice) * 100, 2)
             : 0.0;
@@ -304,8 +311,9 @@ class CommodityMarketAnalysisService
             return 'Alta demanda y poca oferta';
         }
 
-        $price6hAgo = $this->nearestPrice($rows, now()->subHours(6));
-        if ($price6hAgo) {
+        $price6hAgoRow = $this->nearestRow($rows, now()->subHours(6));
+        if ($price6hAgoRow) {
+            $price6hAgo = $this->effectivePrice($price6hAgoRow);
             $recentDrop = (($price6hAgo - $stats['current_price_copper']) / $price6hAgo) * 100;
             if ($recentDrop >= 10) {
                 return 'Caída rápida en las últimas 6 horas';
@@ -349,13 +357,11 @@ class CommodityMarketAnalysisService
         return sqrt($variance);
     }
 
-    protected function nearestPrice($rows, Carbon $target): ?int
+    protected function nearestRow($rows, Carbon $target)
     {
-        $closest = $rows->sortBy(function ($row) use ($target) {
+        return $rows->sortBy(function ($row) use ($target) {
             return abs(Carbon::parse($row->snapshot_at)->diffInSeconds($target));
         })->first();
-
-        return $closest ? (int) $closest->min_price_copper : null;
     }
 
     public function estimatePurchase(int $itemId, int $quantity): array
@@ -404,7 +410,7 @@ class CommodityMarketAnalysisService
         foreach ($stepsGold as $stepGold) {
             $sellPrice = $unitPriceCopper + ($stepGold * 10000);
             $totalSaleGross = $sellPrice * $quantity;
-            $totalSaleNet = $totalSaleGross * (1 - self::AH_COMMISSION);
+            $totalSaleNet = $totalSaleGross * 0.95;
             $totalCost = $unitPriceCopper * $quantity;
             $profit = (int) round($totalSaleNet - $totalCost);
 

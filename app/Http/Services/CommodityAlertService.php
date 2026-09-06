@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Http;
 
 class CommodityAlertService
 {
-    private const DISCOUNT_THRESHOLD = 0.88;
+    private const DISCOUNT_THRESHOLD = 0.65;
     private const COOLDOWN_HOURS = 12;
 
     public function __construct(
@@ -81,8 +81,8 @@ class CommodityAlertService
 
         Http::post($webhookUrl, [
             'embeds' => [[
-                'title' => "📉 {$name} está barato",
-                'description' => 'Oportunidad detectada en tu watchlist — margen suficiente para cubrir la comisión del AH y comprar en volumen.',
+                'title' => "🔥 {$name} está muy barato",
+                'description' => 'Caída fuerte de precio en tu watchlist — margen amplio, buena oportunidad de comprar en volumen.',
                 'color' => 3066993,
                 'fields' => [
                     ['name' => 'Precio actual', 'value' => $this->formatGold($currentPrice), 'inline' => true],
