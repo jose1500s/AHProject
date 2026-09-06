@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { ListChecks, Check, Shield, Sparkles, Wand2, Link2, Diamond, Calendar, X, Info, ListCheck  } from '@lucide/vue'
+import { ListChecks, Check, Shield, Sparkles, Wand2, Link2, Diamond, Calendar, X, Info, Vault, ChevronDown } from '@lucide/vue'
 import CoinAmount from './CoinAmount.vue'
 
 const props = defineProps({
@@ -14,6 +14,7 @@ const summary = ref(null)
 const vault = ref(null)
 const vaultCharacterKey = ref(null)
 const vaultLoading = ref(false)
+const vaultMenuOpen = ref(false)
 
 const allConcentration = ref([])
 const concentrationLoading = ref(false)
@@ -25,12 +26,35 @@ const craftRange = ref('7d')
 const craftLoading = ref(false)
 const craftProfessionFilter = ref('Todas')
 
+const trackedCharacters = computed(() =>
+    characters.value.filter(c => c.level >= 80 && c.level <= 90)
+)
+
+const currentVaultCharacter = computed(() =>
+    trackedCharacters.value.find(c => c.key === vaultCharacterKey.value) ?? null
+)
+
+function selectVaultCharacter(key) {
+    vaultCharacterKey.value = key
+    vaultMenuOpen.value = false
+}
+
+function formatDuration(totalSeconds) {
+    if (totalSeconds === null || totalSeconds <= 0) return null
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor((totalSeconds % 86400) / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    if (days > 0) return `${days}d ${hours}h`
+    if (hours > 0) return `${hours}h ${minutes}m`
+    return `${minutes}m`
+}
+
 async function fetchCharacters() {
     const res = await fetch('/api/wow/characters')
     const data = await res.json()
     characters.value = data.characters ?? data
-    if (!vaultCharacterKey.value && characters.value.length) {
-        vaultCharacterKey.value = characters.value[0].key
+    if (!vaultCharacterKey.value && trackedCharacters.value.length) {
+        vaultCharacterKey.value = trackedCharacters.value[0].key
     }
 }
 
@@ -216,7 +240,7 @@ onMounted(async () => {
             </div>
         </div>
 
-        <div class="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-white/10 bg-[#141224]/70 backdrop-blur-xl p-5">
+        <div class="relative z-30 flex flex-wrap items-start justify-between gap-4 rounded-xl border border-white/10 bg-[#141224]/70 backdrop-blur-xl p-5">
             <div class="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-4">
                 <div>
                     <div class="flex items-center gap-1.5">
@@ -234,7 +258,7 @@ onMounted(async () => {
                                     class="relative rounded-xl border border-white/10 bg-[#141224]/95 p-4 shadow-[0_0_30px_rgba(99,102,241,0.15)] backdrop-blur-md">
                                     <div class="mb-2 flex items-center gap-2">
                                         <div class="flex size-7 items-center justify-center rounded-full bg-indigo-500/20">
-                                            <ListCheck  class="size-3.5 text-indigo-300" />
+                                            <Vault class="size-3.5 text-indigo-300" />
                                         </div>
                                         <h3 class="text-sm font-semibold text-slate-100">Gran Bóveda por personaje</h3>
                                     </div>
@@ -353,30 +377,37 @@ onMounted(async () => {
                         </div>
                     </div>
 
-                    <div class="text-[11px] uppercase tracking-wide text-slate-500">Concentración</div>
+                    <div class="text-[11px] uppercase tracking-wide text-slate-500">Concentración (estimada)</div>
                     <div class="mt-1 flex items-baseline justify-between">
                         <span class="text-xl font-bold text-slate-100">
-                            {{ c.quantity }} <span class="text-sm font-normal text-slate-500">/ {{ c.max_quantity }}</span>
+                            {{ c.estimated_quantity }} <span class="text-sm font-normal text-slate-500">/ {{ c.max_quantity }}</span>
                         </span>
-                        <span class="text-xs font-semibold" :class="c.is_max ? 'text-amber-400' : 'text-emerald-400'">
-                            {{ c.is_max ? 'MÁXIMO' : 'RECARGANDO' }}
+                        <span class="text-xs font-semibold" :class="c.is_estimated_max ? 'text-amber-400' : 'text-emerald-400'">
+                            {{ c.is_estimated_max ? 'MÁXIMO' : 'RECARGANDO' }}
                         </span>
                     </div>
 
                     <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
                         <div
                             class="h-full rounded-full transition-all"
-                            :class="c.is_max ? 'bg-amber-400' : 'bg-emerald-400'"
-                            :style="{ width: c.percent + '%' }"
+                            :class="c.is_estimated_max ? 'bg-amber-400' : 'bg-emerald-400'"
+                            :style="{ width: c.estimated_percent + '%' }"
                         ></div>
                     </div>
 
                     <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
                         <span class="flex items-center gap-1">
-                            <Check v-if="c.is_max" class="size-3 text-emerald-400" />
-                            {{ c.is_max ? 'Listo para gastar' : 'Recargando' }}
+                            <Check v-if="c.is_estimated_max" class="size-3 text-emerald-400" />
+                            {{ c.is_estimated_max ? 'Listo para gastar' : 'Recargando' }}
                         </span>
-                        <span>{{ c.percent }}%</span>
+                        <span>{{ c.estimated_percent }}%</span>
+                    </div>
+
+                    <div class="mt-2 border-t border-white/5 pt-2 text-[11px] text-slate-500">
+                        <span v-if="!c.is_estimated_max">
+                            Completa en <span class="font-semibold text-slate-300">{{ formatDuration(c.eta_seconds) ?? 'unos momentos' }}</span>
+                        </span>
+                        <span>· Último sync: {{ c.quantity }}/{{ c.max_quantity }} ({{ timeAgo(c.synced_at) }})</span>
                     </div>
                 </div>
             </div>
@@ -512,13 +543,43 @@ onMounted(async () => {
         </div>
 
         <div class="rounded-xl border border-white/10 bg-[#141224]/70 backdrop-blur-xl p-5">
-            <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-indigo-400">
-                <Shield class="size-3.5" />
-                Progreso semanal
-            </div>
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-indigo-400">
+                        <Shield class="size-3.5" />
+                        Progreso semanal
+                    </div>
 
-            <h2 class="text-lg font-bold text-slate-100">Gran bóveda</h2>
-            <p class="mb-4 text-sm text-slate-500">Completa actividades para desbloquear tus recompensas</p>
+                    <h2 class="text-lg font-bold text-slate-100">Gran bóveda</h2>
+                    <p class="mb-4 text-sm text-slate-500">Completa actividades para desbloquear tus recompensas</p>
+                </div>
+
+                <div class="relative w-56">
+                    <button type="button" @click="vaultMenuOpen = !vaultMenuOpen"
+                        class="flex w-full items-center justify-between rounded-lg border border-indigo-400/30 bg-[#12142b] px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-indigo-400/60 focus:outline-none focus:border-indigo-400">
+                        <span>{{ currentVaultCharacter ? `${currentVaultCharacter.name} · ${currentVaultCharacter.realm}` : 'Selecciona un personaje' }}</span>
+                        <ChevronDown class="size-4 text-indigo-300 transition-transform duration-200" :class="{ 'rotate-180': vaultMenuOpen }" />
+                    </button>
+
+                    <div v-if="vaultMenuOpen"
+                        class="absolute right-0 z-10 mt-2 w-56 overflow-hidden rounded-xl border border-indigo-400/20 bg-[#12142b]/95 backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
+                        <ul class="app-scroll max-h-56 overflow-y-auto overscroll-contain">
+                            <li v-for="c in trackedCharacters" :key="c.key" @click="selectVaultCharacter(c.key)"
+                                class="flex cursor-pointer items-center justify-between px-4 py-2.5 text-sm transition-colors"
+                                :class="c.key === vaultCharacterKey
+                                    ? 'bg-indigo-500/15 text-indigo-300 font-medium'
+                                    : 'text-slate-300 hover:bg-white/5 hover:text-white'">
+                                {{ c.name }} · {{ c.realm }}
+                                <span v-if="c.key === vaultCharacterKey" class="size-1.5 rounded-full bg-indigo-400"></span>
+                            </li>
+
+                            <li v-if="!trackedCharacters.length" class="px-4 py-3 text-sm text-slate-500">
+                                Sin personajes disponibles
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
 
             <div v-if="!vault" class="py-6 text-center text-sm text-slate-500">
                 Sin datos de la Gran Bóveda todavía.

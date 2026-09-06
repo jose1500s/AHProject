@@ -45,4 +45,8 @@ return [
         'token' => env('WOW_TRACKER_TOKEN'),
     ],
 
+    'discord' => [
+        'webhook_url' => env('DISCORD_WEBHOOK_URL'),
+    ],
+
 ];

@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import ItemCard from './ItemCard.vue'
 import Pagination from './Pagination.vue'
 import CommodityDetailModal from './CommodityDetailModal.vue'
+import CommodityWatchlist from './CommodityWatchlist.vue'
 
 const search = ref('')
 const commodities = ref({ data: [], links: [] })
@@ -137,6 +138,8 @@ function closeDetail() {
             mode="callback"
             @navigate="fetchCommodities"
         />
+
+        <CommodityWatchlist class="w-full" @open-item="openDetail" />
 
         <CommodityDetailModal v-if="mounted" :item-id="selectedItemId" @close="closeDetail" />
     </div>

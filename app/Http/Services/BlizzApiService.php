@@ -1058,24 +1058,71 @@ class BlizzApiService
 
     protected function saveCommodityPriceHistorySnapshot(): void
     {
-        $snapshot = DB::table('commodity_auctions')
-            ->select(
-                'item_id',
-                DB::raw('MIN(unit_price) as min_price_copper'),
-                DB::raw('COUNT(*) as listings'),
-                DB::raw('SUM(quantity) as volume')
-            )
-            ->groupBy('item_id')
-            ->get()
-            ->map(fn($row) => [
-                'item_id' => $row->item_id,
-                'min_price_copper' => $row->min_price_copper,
-                'listings' => $row->listings,
-                'volume' => $row->volume,
-                'snapshot_at' => now(),
-            ]);
+        $minLiquidQuantity = 20;
 
-        $snapshot->chunk(1000)->each(fn($chunk) => CommodityPriceHistory::insert($chunk->all()));
+        $rows = DB::table('commodity_auctions')
+            ->select('item_id', 'unit_price', 'quantity')
+            ->orderBy('item_id')
+            ->orderBy('unit_price')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return;
+        }
+
+        $now = now();
+        $aggregates = [];
+
+        $currentItemId = null;
+        $cumulativeQty = 0;
+        $liquidPrice = null;
+        $minPrice = null;
+        $listings = 0;
+        $volume = 0;
+
+        $flush = function () use (&$aggregates, &$currentItemId, &$minPrice, &$liquidPrice, &$listings, &$volume, $now) {
+            if ($currentItemId === null) {
+                return;
+            }
+
+            $aggregates[] = [
+                'item_id' => $currentItemId,
+                'min_price_copper' => $minPrice,
+                'liquid_price_copper' => $liquidPrice ?? $minPrice,
+                'listings' => $listings,
+                'volume' => $volume,
+                'snapshot_at' => $now,
+            ];
+        };
+
+        foreach ($rows as $row) {
+            if ($row->item_id !== $currentItemId) {
+                $flush();
+
+                $currentItemId = $row->item_id;
+                $cumulativeQty = 0;
+                $liquidPrice = null;
+                $minPrice = null;
+                $listings = 0;
+                $volume = 0;
+            }
+
+            if ($minPrice === null) {
+                $minPrice = $row->unit_price;
+            }
+
+            $listings++;
+            $volume += $row->quantity;
+            $cumulativeQty += $row->quantity;
+
+            if ($liquidPrice === null && $cumulativeQty >= $minLiquidQuantity) {
+                $liquidPrice = $row->unit_price;
+            }
+        }
+
+        $flush();
+
+        collect($aggregates)->chunk(1000)->each(fn($chunk) => CommodityPriceHistory::insert($chunk->all()));
     }
 
     public function getCommodityListings(?string $search = null, int $perPage = 24)
