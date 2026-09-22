@@ -1,7 +1,9 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { TrendingUp, TrendingDown, Minus } from '@lucide/vue'
+import VueApexCharts from 'vue3-apexcharts'
 
+defineOptions({ components: { apexchart: VueApexCharts } })
 const props = defineProps({
     itemId: { type: Number, required: true },
     ilvl: { type: Number, default: null },

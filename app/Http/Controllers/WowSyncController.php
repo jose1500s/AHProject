@@ -11,7 +11,12 @@ use App\Models\WowCharacterInventory;
 use App\Models\WowCharacterConcentration;
 use App\Models\WowCharacterVault;
 use App\Models\WowCraftHistory;
+use App\Models\FarmNodeEvent;
+use App\Models\FarmSession;
+use App\Models\WowGoldSnapshot;
+use App\Models\WowCharacterGoldSnapshot;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class WowSyncController extends Controller
@@ -31,6 +36,18 @@ class WowSyncController extends Controller
         $transactionsIn = $payload['auctionTransactions'] ?? [];
         $feesIn = $payload['postFees'] ?? [];
         $craftHistoryIn = $payload['craftHistory'] ?? [];
+        $farmNodeEventsIn = $payload['farmNodeEvents'] ?? [];
+        $activeCharacterIn = $payload['activeCharacter'] ?? null;
+
+        if (is_string($activeCharacterIn) && $activeCharacterIn !== '') {
+            Cache::put('wow_active_character', $activeCharacterIn, now()->addDays(7));
+
+            $activeSession = FarmSession::where('status', 'active')->first();
+
+            if ($activeSession && $activeSession->character_key !== $activeCharacterIn) {
+                $activeSession->update(['character_key' => $activeCharacterIn]);
+            }
+        }
 
         $summary = [
             'characters' => 0,
@@ -39,9 +56,11 @@ class WowSyncController extends Controller
             'active_auctions' => 0,
             'inventory_items' => 0,
             'crafts_new' => 0,
+            'farm_nodes_new' => 0,
+            'farm_nodes_merged' => 0,
         ];
 
-        DB::transaction(function () use ($charactersIn, $warbandIn, $transactionsIn, $feesIn, $craftHistoryIn, &$summary) {
+        DB::transaction(function () use ($charactersIn, $warbandIn, $transactionsIn, $feesIn, $craftHistoryIn, $farmNodeEventsIn, &$summary) {
             foreach ($charactersIn as $characterKey => $char) {
                 $characterSyncedAt = isset($char['lastUpdated'])
                     ? now()->createFromTimestamp($char['lastUpdated'])
@@ -282,7 +301,67 @@ class WowSyncController extends Controller
                     $summary['crafts_new'] = $afterCount - $beforeCount;
                 }
             }
+
+            if (is_array($farmNodeEventsIn) && !empty($farmNodeEventsIn)) {
+                $rows = collect($farmNodeEventsIn)->map(fn($event) => [
+                    'character_key' => $event['character'] ?? '',
+                    'source_id' => $event['id'] ?? null,
+                    'profession' => $event['profession'] ?? null,
+                    'item_id' => $event['itemID'] ?? null,
+                    'quantity' => $event['quantity'] ?? 1,
+                    'occurred_at' => isset($event['occurredAt'])
+                        ? now()->createFromTimestamp($event['occurredAt'])
+                        : now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ])->filter(fn($row) => $row['source_id'] !== null && $row['character_key'] !== '' && $row['item_id'] !== null)
+                    ->values()->all();
+
+                if (!empty($rows)) {
+                    $beforeCount = FarmNodeEvent::count();
+
+                    FarmNodeEvent::upsert(
+                        $rows,
+                        ['character_key', 'source_id'],
+                        ['profession', 'item_id', 'quantity', 'occurred_at', 'updated_at']
+                    );
+
+                    $afterCount = FarmNodeEvent::count();
+                    $summary['farm_nodes_new'] = $afterCount - $beforeCount;
+                    $summary['farm_nodes_merged'] = count($rows) - $summary['farm_nodes_new'];
+                }
+            }
         });
+
+        // Snapshot del oro total (personajes + warband) tras cada sync real. Alimenta
+        // la grafica de "Evolucion del oro" y el % de cambio semanal en el hero de Mi Oro.
+        $charactersGold = WowCharacter::sum('gold_copper');
+        $warbandGold = WowWarband::value('gold_copper') ?? 0;
+
+        WowGoldSnapshot::create([
+            'characters_gold_copper' => $charactersGold,
+            'warband_gold_copper' => $warbandGold,
+            'total_gold_copper' => $charactersGold + $warbandGold,
+            'snapshot_at' => now(),
+        ]);
+
+        // Snapshot de oro INDIVIDUAL por personaje, en el mismo instante. Se recorren
+        // TODOS los personajes conocidos (no solo los que vinieron en este payload)
+        // para que la grafica por personaje quede consistente con la suma total de
+        // arriba, aunque hoy solo se haya sincronizado un personaje especifico.
+        $now = now();
+        $characterSnapshotRows = WowCharacter::pluck('gold_copper', 'character_key')
+            ->map(fn($gold, $characterKey) => [
+                'character_key' => $characterKey,
+                'gold_copper' => $gold,
+                'snapshot_at' => $now,
+            ])
+            ->values()
+            ->all();
+
+        if (!empty($characterSnapshotRows)) {
+            WowCharacterGoldSnapshot::insert($characterSnapshotRows);
+        }
 
         return response()->json(['ok' => true, 'summary' => $summary]);
     }

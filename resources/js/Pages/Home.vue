@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { Head } from '@inertiajs/vue3'
-import { Gavel, Boxes, Wallet, Hammer, ListChecks } from '@lucide/vue'
+import { Gavel, Boxes, Wallet, Hammer, ListChecks, Pickaxe } from '@lucide/vue'
 import Layout from './Layout.vue'
 import ItemCard from './Components/ItemCard.vue';
 import CategoryFilter from './Components/CategoryFilter.vue';
@@ -12,6 +12,7 @@ import CommoditiesGrid from './Components/CommoditiesGrid.vue';
 import MyGoldDashboard from './Components/MyGoldDashboard.vue';
 import BestCraftsDashboard from './Components/BestCraftsDashboard.vue';
 import WeeklyChecklistDashboard from './Components/WeeklyChecklistDashboard.vue';
+import FarmSessionsDashboard from './Components/FarmSessionsDashboard.vue';
 import { useRealmSelection } from '../Composables/useRealmSelection.js'
 
 const props = defineProps({
@@ -22,7 +23,7 @@ const props = defineProps({
 
 const { realmSlug } = useRealmSelection(props.realms)
 
-const VALID_TABS = ['auctions', 'commodities', 'mygold', 'bestcrafts', 'checklist']
+const VALID_TABS = ['auctions', 'commodities', 'mygold', 'bestcrafts', 'checklist', 'farmsessions']
 const activeTab = ref('auctions')
 const commoditiesSyncing = ref(false)
 
@@ -129,6 +130,16 @@ watch(activeTab, (value) => {
                     <ListChecks class="size-4" />
                     To Do List
                 </button>
+                <button
+                    type="button"
+                    @click="switchTab('farmsessions')"
+                    :disabled="commoditiesSyncing"
+                    class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                    :class="activeTab === 'farmsessions' ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:text-white'"
+                >
+                    <Pickaxe class="size-4" />
+                    Farm Sessions
+                </button>
             </div>
 
             <div v-show="activeTab === 'auctions'" class="flex flex-col items-center gap-5 w-full">
@@ -169,6 +180,10 @@ watch(activeTab, (value) => {
 
             <div v-show="activeTab === 'checklist'" class="w-full">
                 <WeeklyChecklistDashboard :realm-slug="realmSlug" />
+            </div>
+
+            <div v-show="activeTab === 'farmsessions'" class="w-full">
+                <FarmSessionsDashboard />
             </div>
         </main>
 

@@ -12,6 +12,7 @@ use App\Http\Controllers\BestCraftsController;
 use App\Http\Controllers\WowCraftHistoryController;
 use App\Http\Controllers\WowChecklistController;
 use App\Http\Controllers\CommodityWatchlistController;
+use App\Http\Controllers\FarmSessionController;
 
 Route::get('/', [Main::class, 'Home']);
 Route::get('/items/{itemId}/auctions', [ItemAuctionsController::class, 'show']);
@@ -46,3 +47,16 @@ Route::post('/api/commodities/watchlist', [CommodityWatchlistController::class, 
 Route::delete('/api/commodities/watchlist/{id}', [CommodityWatchlistController::class, 'destroy']);
 Route::get('/api/commodities/{itemId}/buy-estimate', [CommodityWatchlistController::class, 'buyEstimate']);
 Route::get('/api/commodities/{itemId}/profit-ladder', [CommodityWatchlistController::class, 'profitLadder']);
+
+Route::get('/api/farm-sessions/summary', [FarmSessionController::class, 'summary']);
+Route::get('/api/farm-sessions/analytics', [FarmSessionController::class, 'analytics']);
+Route::get('/api/farm-sessions/detected-character', [FarmSessionController::class, 'detectedCharacter']);
+Route::post('/api/farm-sessions', [FarmSessionController::class, 'store']);
+Route::patch('/api/farm-sessions/{id}/stop', [FarmSessionController::class, 'stop']);
+Route::get('/api/farm-sessions', [FarmSessionController::class, 'index']);
+Route::get('/api/farm-sessions/{id}', [FarmSessionController::class, 'show']);
+Route::get('/api/farm-sessions/{id}/stats', [FarmSessionController::class, 'stats']);
+Route::delete('/api/farm-sessions/{id}', [FarmSessionController::class, 'destroy']);
+Route::get('/api/wow/gold-history', [WowDashboardController::class, 'goldHistory']);
+Route::get('/api/wow/gold-goal', [WowDashboardController::class, 'goldGoal']);
+Route::post('/api/wow/gold-goal', [WowDashboardController::class, 'updateGoldGoal']);
