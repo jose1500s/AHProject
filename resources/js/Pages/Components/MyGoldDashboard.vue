@@ -1,10 +1,14 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag, X, Vault } from '@lucide/vue'
+import { TrendingUp, TrendingDown, Wallet, Award, Gavel, ChevronDown, ArrowUp, ArrowDown, Package, Search, RefreshCw, Calendar, ShoppingBag, X, Vault, LineChart, Target, Pencil, Check } from '@lucide/vue'
+import VueApexCharts from 'vue3-apexcharts'
 import CoinAmount from './CoinAmount.vue'
+
+defineOptions({ components: { apexchart: VueApexCharts } })
 
 const CHARACTER_STORAGE_KEY = 'mygold_selected_character'
 const HIDDEN_CHARACTERS_KEY = 'mygold_hidden_characters'
+const PALETTE = ['#818cf8', '#22d3ee', '#fbbf24', '#34d399', '#f472b6', '#a78bfa', '#fb923c', '#60a5fa']
 
 const characters = ref([])
 const warband = ref(null)
@@ -36,6 +40,15 @@ const openSalesItems = ref(new Set())
 const syncing = ref(false)
 const syncCooldown = ref(0)
 
+const goldHistory = ref(null)
+const goldHistoryRange = ref('7d')
+const loadingGoldHistory = ref(false)
+
+const goldGoal = ref(null)
+const goalEditing = ref(false)
+const goalSaving = ref(false)
+const goalForm = ref({ title: '', target_gold: null, deadline_date: '' })
+
 async function fetchCharacters() {
     const res = await fetch('/api/wow/characters')
     const data = await res.json()
@@ -49,6 +62,51 @@ async function fetchOverview() {
 
     const res = await fetch(`/api/wow/overview?${params}`)
     overview.value = await res.json()
+}
+
+async function fetchGoldHistory() {
+    loadingGoldHistory.value = true
+    try {
+        const params = new URLSearchParams({ range: goldHistoryRange.value })
+        if (selectedCharacter.value) params.append('character', selectedCharacter.value)
+
+        const res = await fetch(`/api/wow/gold-history?${params}`)
+        goldHistory.value = await res.json()
+    } finally {
+        loadingGoldHistory.value = false
+    }
+}
+
+async function fetchGoldGoal() {
+    const res = await fetch('/api/wow/gold-goal')
+    const data = await res.json()
+    goldGoal.value = data.goal
+}
+
+function startEditGoal() {
+    goalForm.value = {
+        title: goldGoal.value?.title ?? 'Mi meta de oro',
+        target_gold: goldGoal.value?.target_gold_number ?? null,
+        deadline_date: goldGoal.value?.deadline_date ?? '',
+    }
+    goalEditing.value = true
+}
+
+async function saveGoal() {
+    if (!goalForm.value.title || !goalForm.value.target_gold) return
+
+    goalSaving.value = true
+    try {
+        await fetch('/api/wow/gold-goal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(goalForm.value),
+        })
+        await fetchGoldGoal()
+        goalEditing.value = false
+    } finally {
+        goalSaving.value = false
+    }
 }
 
 async function fetchActiveAuctions() {
@@ -88,13 +146,20 @@ async function fetchSalesByItem() {
 }
 
 async function refreshAll() {
-    await Promise.all([
+    const calls = [
         fetchCharacters(),
         fetchOverview(),
         fetchActiveAuctions(),
         fetchTransactions(),
         fetchSalesByItem(),
-    ])
+        fetchGoldHistory(),
+    ]
+
+    if (!selectedCharacter.value) {
+        calls.push(fetchGoldGoal())
+    }
+
+    await Promise.all(calls)
 }
 
 let cooldownTimer = null
@@ -132,6 +197,7 @@ watch(selectedCharacter, (value) => {
 })
 
 watch(txFilter, () => fetchTransactions())
+watch(goldHistoryRange, () => fetchGoldHistory())
 
 onMounted(async () => {
     await fetchCharacters()
@@ -209,9 +275,7 @@ function toggleSalesItem(itemName) {
 
 function formatCompactGold(gold) {
     const n = gold ?? 0
-    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'm'
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
-    return String(n)
+    return n.toLocaleString('es-MX')
 }
 
 function formatTimeLeft(seconds) {
@@ -235,6 +299,13 @@ function formatShortDate(dateStr) {
 function formatFullDate(dateStr) {
     return new Date(dateStr).toLocaleString('es-MX', {
         day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+}
+
+function formatDeadline(dateStr) {
+    if (!dateStr) return 'Sin fecha límite'
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('es-MX', {
+        day: '2-digit', month: 'long', year: 'numeric',
     })
 }
 
@@ -263,6 +334,79 @@ const QUALITY_BAR_COLORS = {
     poor: 'bg-slate-400', common: 'bg-slate-300', uncommon: 'bg-emerald-500',
     rare: 'bg-sky-500', epic: 'bg-purple-500', legendary: 'bg-orange-500',
 }
+
+function copperToGoldNumber(copper) {
+    return Math.round((copper || 0) / 10000)
+}
+
+const goldEvolutionChartOptions = computed(() => {
+    const series = goldHistory.value?.series ?? []
+    const showMarkers = series.length <= 5
+
+    return {
+        chart: {
+            type: 'area',
+            toolbar: { show: false },
+            zoom: { enabled: false },
+            background: 'transparent',
+            fontFamily: 'inherit',
+        },
+        theme: { mode: 'dark' },
+        colors: [PALETTE[3]],
+        dataLabels: { enabled: false },
+        stroke: { curve: 'smooth', width: 3 },
+        fill: {
+            type: 'gradient',
+            gradient: {
+                shadeIntensity: 1,
+                opacityFrom: 0.45,
+                opacityTo: 0.05,
+                stops: [0, 90, 100],
+            },
+        },
+        markers: {
+            size: showMarkers ? 5 : 0,
+            colors: [PALETTE[3]],
+            strokeColors: '#12142b',
+            strokeWidth: 2,
+            hover: { size: 7 },
+        },
+        grid: {
+            borderColor: 'rgba(255,255,255,0.08)',
+            strokeDashArray: 4,
+            padding: { left: 8, right: 8 },
+        },
+        xaxis: {
+            type: 'datetime',
+            categories: series.map(s => s.snapshot_at),
+            labels: { style: { colors: '#64748b', fontSize: '11px' } },
+            axisBorder: { show: false },
+            axisTicks: { show: false },
+            crosshairs: {
+                show: true,
+                position: 'back',
+                stroke: { color: '#64748b', width: 1, dashArray: 4 },
+            },
+        },
+        yaxis: {
+            labels: {
+                style: { colors: '#64748b', fontSize: '11px' },
+                formatter: (val) => val === undefined || val === null ? '' : `${formatCompactGold(Math.round(val))}g`,
+            },
+        },
+        tooltip: {
+            theme: 'dark',
+            x: { format: 'dd MMM HH:mm' },
+            y: { formatter: (val) => `${val?.toLocaleString('es-MX') ?? 0}g` },
+            marker: { show: true },
+        },
+    }
+})
+
+const goldEvolutionChartSeries = computed(() => [{
+    name: 'Oro total',
+    data: (goldHistory.value?.series ?? []).map(s => copperToGoldNumber(s.total_gold_copper)),
+}])
 </script>
 
 <template>
@@ -355,45 +499,151 @@ const QUALITY_BAR_COLORS = {
             </div>
         </div>
 
-        <!-- vista consolidada: oro combinado + warband -->
-        <div v-else-if="overview" class="grid grid-cols-2 gap-4">
-            <div class="flex items-center justify-between rounded-2xl border border-white/10 bg-[#12142b] p-5">
-                <div class="flex items-center gap-3">
-                    <div class="flex size-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-300">
-                        <Wallet class="size-6" />
+        <!-- vista consolidada: 3 cards (oro combinado, resumen de actividad, objetivo de oro) -->
+        <div v-else-if="overview" class="grid grid-cols-3 gap-4">
+            <div class="rounded-2xl border border-white/10 bg-[#12142b] p-5">
+                <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Oro total combinado</p>
+                <p class="text-3xl font-bold text-amber-400">
+                    {{ formatCompactGold(goldHistory ? copperToGoldNumber(goldHistory.current_total_copper) : 0) }}g
+                </p>
+                <p v-if="goldHistory?.week_change_percent !== null && goldHistory?.week_change_percent !== undefined"
+                    class="mt-1 text-xs font-semibold"
+                    :class="goldHistory.week_change_percent >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                    {{ goldHistory.week_change_percent >= 0 ? '+' : '' }}{{ goldHistory.week_change_percent }}% frente a la semana pasada
+                </p>
+                <p v-else class="mt-1 text-xs text-slate-500">Aún no hay suficiente historial</p>
+
+                <div class="mt-3 flex items-center gap-4 border-t border-white/5 pt-3">
+                    <div>
+                        <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Warband</p>
+                        <p class="text-lg font-bold text-amber-400">{{ warband ? formatCompactGold(warband.gold) : '—' }}g</p>
                     </div>
                     <div>
-                        <h2 class="text-sm font-bold text-slate-100">Oro combinado</h2>
-                        <p class="text-xs text-slate-500">{{ visibleCharacters.length }} personajes</p>
+                        <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Personajes</p>
+                        <p class="text-lg font-bold text-amber-400">{{ formatCompactGold(overview.current_gold.gold) }}g</p>
                     </div>
                 </div>
-                <CoinAmount
-                    :gold="overview.current_gold.gold"
-                    :silver="overview.current_gold.silver"
-                    :copper="overview.current_gold.copper"
-                    size="text-xl"
-                />
             </div>
 
-            <div class="flex items-center justify-between rounded-2xl border border-white/10 bg-[#12142b] p-5">
-                <div class="flex items-center gap-3">
-                    <div class="flex size-12 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
-                        <Vault class="size-6" />
+            <div class="rounded-2xl border border-white/10 bg-[#12142b] p-5">
+                <div class="mb-3 flex items-center justify-between">
+                    <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Resumen de actividad</p>
+                    <span class="text-[10px] font-medium text-indigo-300">Vista actual</span>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <p class="text-lg font-bold text-slate-100">{{ overview.today_sales_count }}</p>
+                        <p class="text-[10px] text-slate-500">Ventas hoy</p>
                     </div>
                     <div>
-                        <h2 class="text-sm font-bold text-slate-100">Warband</h2>
-                        <p class="text-xs text-slate-500">Banco de cuenta</p>
+                        <p class="text-lg font-bold text-slate-100">{{ overview.total_earned_count }}</p>
+                        <p class="text-[10px] text-slate-500">Ventas totales</p>
+                    </div>
+                    <div>
+                        <p class="text-lg font-bold text-slate-100">{{ overview.total_spent_count }}</p>
+                        <p class="text-[10px] text-slate-500">Compras totales</p>
                     </div>
                 </div>
-                <CoinAmount
-                    v-if="warband"
-                    :gold="warband.gold"
-                    :silver="warband.silver"
-                    :copper="warband.copper"
-                    size="text-xl"
-                />
-                <span v-else class="text-sm text-slate-500">—</span>
+                <div class="mt-4 flex items-center gap-6 border-t border-white/5 pt-3">
+                    <div>
+                        <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Ganancia neta generada</p>
+                        <p class="text-lg font-bold text-emerald-400">
+                            +{{ formatCompactGold(overview.net_profit.gold) }}g
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Ganancia hoy</p>
+                        <p class="text-lg font-bold" :class="overview.today_net_profit.gold >= 0 ? 'text-emerald-400' : 'text-red-400'">
+                            {{ overview.today_net_profit.gold >= 0 ? '+' : '' }}{{ formatCompactGold(overview.today_net_profit.gold) }}g
+                        </p>
+                    </div>
+                </div>
             </div>
+
+            <div class="rounded-2xl border border-amber-400/20 bg-gradient-to-br from-amber-500/5 to-transparent p-5">
+                <template v-if="!goalEditing">
+                    <div class="mb-3 flex items-center justify-between">
+                        <p class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300">
+                            <Target class="size-3.5" /> {{ goldGoal ? goldGoal.title : 'Objetivo de oro' }}
+                        </p>
+                        <button type="button" @click="startEditGoal" class="rounded p-1 text-slate-500 transition hover:bg-white/5 hover:text-amber-300">
+                            <Pencil class="size-3.5" />
+                        </button>
+                    </div>
+
+                    <template v-if="goldGoal">
+                        <p class="text-3xl font-bold text-amber-300">{{ goldGoal.target_gold.gold.toLocaleString('es-MX') }}g</p>
+                        <p class="text-sm text-slate-400">
+                            <span class="text-slate-500">Fecha límite:</span> {{ formatDeadline(goldGoal.deadline_date) }}
+                            <span v-if="goldGoal.days_remaining !== null" class="ml-1 font-semibold"
+                                :class="goldGoal.days_remaining >= 0 ? 'text-amber-300' : 'text-red-400'">
+                                ({{ goldGoal.days_remaining >= 0 ? `faltan ${goldGoal.days_remaining} día${goldGoal.days_remaining === 1 ? '' : 's'}` : `vencida hace ${Math.abs(goldGoal.days_remaining)} día${Math.abs(goldGoal.days_remaining) === 1 ? '' : 's'}` }})
+                            </span>
+                        </p>
+
+                        <div class="mt-3 h-2 w-full rounded-full bg-white/5">
+                            <div class="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all"
+                                :style="{ width: goldGoal.percent_achieved + '%' }"></div>
+                        </div>
+                        <div class="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+                            <span>{{ goldGoal.percent_achieved }}% cumplido</span>
+                            <span>{{ formatCompactGold(goldGoal.remaining.gold) }}g restante</span>
+                        </div>
+                    </template>
+                    <p v-else class="py-2 text-sm text-slate-500">Aún no has definido una meta. Da clic en el lápiz para crear una.</p>
+                </template>
+
+                <template v-else>
+                    <div class="mb-3 flex items-center justify-between">
+                        <p class="text-[10px] font-semibold uppercase tracking-widest text-amber-300">Configurar meta</p>
+                        <button type="button" @click="goalEditing = false" class="text-slate-500 hover:text-white">
+                            <X class="size-3.5" />
+                        </button>
+                    </div>
+
+                    <div class="flex flex-col gap-2">
+                        <input v-model="goalForm.title" type="text" placeholder="Título de la meta"
+                            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400/60" />
+                        <input v-model.number="goalForm.target_gold" type="number" placeholder="Meta en oro (ej. 2500000)"
+                            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-amber-400/60" />
+                        <input v-model="goalForm.deadline_date" type="date"
+                            class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-amber-400/60" />
+
+                        <button type="button" @click="saveGoal" :disabled="goalSaving"
+                            class="mt-1 flex items-center justify-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-sm font-semibold text-amber-300 transition-colors hover:border-amber-400/70 hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50">
+                            <Check class="size-4" />
+                            {{ goalSaving ? 'Guardando...' : 'Guardar meta' }}
+                        </button>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- grafica de evolucion del oro -- disponible tanto en vista consolidada como por personaje -->
+        <div class="rounded-2xl border border-white/10 bg-[#12142b] p-5">
+            <div class="mb-3 flex items-center justify-between">
+                <h3 class="flex items-center gap-2 text-sm font-bold text-slate-100">
+                    <LineChart class="size-4 text-amber-400" />
+                    Evolución del oro
+                    <span v-if="currentCharacter" class="font-normal text-slate-500">— {{ currentCharacter.name }}</span>
+                </h3>
+                <div class="flex items-center gap-1 rounded-lg border border-white/10 p-0.5">
+                    <button v-for="r in [{ label: '1D', value: '1d' }, { label: '7D', value: '7d' }, { label: '30D', value: '30d' }, { label: '90D', value: '90d' }]"
+                        :key="r.value" type="button" @click="goldHistoryRange = r.value"
+                        class="rounded px-2.5 py-1 text-xs font-semibold transition-colors"
+                        :class="goldHistoryRange === r.value ? 'bg-amber-500/20 text-amber-300' : 'text-slate-500 hover:text-white'">
+                        {{ r.label }}
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="loadingGoldHistory" class="flex h-56 items-center justify-center text-sm text-slate-500">
+                Cargando...
+            </div>
+            <div v-else-if="!goldHistory?.series?.length" class="flex h-56 items-center justify-center text-center text-sm text-slate-500">
+                Aún no hay suficiente historial para graficar — se irá llenando con cada sync.
+            </div>
+            <apexchart v-else type="area" height="260" :options="goldEvolutionChartOptions" :series="goldEvolutionChartSeries" />
         </div>
 
         <!-- 4 cards de estadisticas -->
@@ -431,7 +681,7 @@ const QUALITY_BAR_COLORS = {
             </div>
         </div>
 
-        <div v-if="overview" class="grid grid-cols-3 gap-3">
+        <div v-if="overview" class="grid grid-cols-4 gap-3">
             <div class="rounded-xl border border-white/10 bg-[#12142b] p-4">
                 <div class="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-amber-400">
                     <Award class="size-3.5" /> Mejor venta
@@ -465,6 +715,14 @@ const QUALITY_BAR_COLORS = {
                 <div class="mt-2 h-1.5 w-full rounded-full bg-white/5">
                     <div class="h-full rounded-full bg-red-500" style="width: 100%"></div>
                 </div>
+            </div>
+
+            <div class="rounded-xl border border-white/10 bg-[#12142b] p-4">
+                <div class="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300">
+                    <TrendingUp class="size-3.5" /> Promedio diario
+                </div>
+                <CoinAmount :gold="overview.avg_daily_earned.gold" :silver="overview.avg_daily_earned.silver" :copper="overview.avg_daily_earned.copper" />
+                <p class="mt-1 text-xs text-slate-500">{{ overview.avg_daily_days }} día(s)</p>
             </div>
         </div>
 

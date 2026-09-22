@@ -3,6 +3,7 @@ import laravel from 'laravel-vite-plugin';
 import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue'
 import inertia from '@inertiajs/vite'
+import Unimport from 'unimport/unplugin'
 
 export default defineConfig({
     plugins: [
@@ -14,6 +15,12 @@ export default defineConfig({
         vue(),
         inertia({
             ssr: false,
+        }),
+        Unimport.vite({
+            addons: {
+                vueTemplate: true,
+            },
+            imports: [{name: 'push', from: 'notivue'}]
         })
     ],
     server: {

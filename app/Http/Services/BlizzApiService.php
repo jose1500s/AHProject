@@ -630,7 +630,7 @@ class BlizzApiService
         return Cache::get("auctions_last_modified:{$connectedRealmId}");
     }
 
-    protected function syncRealmsToDbParallel(array $realmSlugs, bool $force = false): array
+    protected function syncRealmsToDbParallel(array $realmSlugs, bool $force = false, bool $skipSnapshot = false): array
     {
         $token = $this->getAccessToken();
 
@@ -655,6 +655,8 @@ class BlizzApiService
 
             // descarga TODOS los reinos en paralelo (una sola espera de red,
             // en vez de una espera secuencial por cada uno)
+            $poolStart = microtime(true);
+
             $responses = Http::pool(fn($pool) => $connectedRealmIds->map(function ($connectedRealmId) use ($pool, $token, $force, $lastModifiedByRealm) {
                 $request = $pool->as($connectedRealmId)->withToken($token)->timeout(60);
 
@@ -668,11 +670,18 @@ class BlizzApiService
                 );
             })->all());
 
+            \Illuminate\Support\Facades\Log::info('[realm-compare] descarga en paralelo completada', [
+                'reinos' => $connectedRealmIds->count(),
+                'segundos' => round(microtime(true) - $poolStart, 2),
+            ]);
+
             ini_set('memory_limit', '1024M');
 
             $results = [];
 
             foreach ($connectedRealmIds as $slug => $connectedRealmId) {
+                $realmStart = microtime(true);
+
                 $response = $responses[$connectedRealmId] ?? null;
 
                 if (!$response instanceof \Illuminate\Http\Client\Response) {
@@ -732,9 +741,26 @@ class BlizzApiService
                 });
 
                 Cache::put("auctions_last_modified:{$connectedRealmId}", $response->header('Last-Modified'), now()->addDay());
-                $this->savePriceHistorySnapshot($connectedRealmId);
+
+                // El snapshot de historial de precios es pesado (lee todas las subastas +
+                // cruza contra ItemLevelLookup) y NO es necesario para la tabla de
+                // comparación en vivo, solo para las gráficas de tendencia. Al saltarlo
+                // aquí (skipSnapshot=true desde getRealmPriceComparison), el procesamiento
+                // secuencial por reino baja de ~2 pasos pesados a 1, reduciendo
+                // drásticamente el tiempo total con 3+ reinos.
+                if (!$skipSnapshot) {
+                    $this->savePriceHistorySnapshot($connectedRealmId);
+                }
 
                 $results[$slug] = ['updated' => true, 'connected_realm_id' => $connectedRealmId, 'count' => $totalAuctions];
+
+                \Illuminate\Support\Facades\Log::info('[realm-compare] reino procesado', [
+                    'slug' => $slug,
+                    'connected_realm_id' => $connectedRealmId,
+                    'subastas' => $totalAuctions,
+                    'skip_snapshot' => $skipSnapshot,
+                    'segundos' => round(microtime(true) - $realmStart, 2),
+                ]);
             }
 
             return $results;
@@ -747,7 +773,9 @@ class BlizzApiService
 
     public function getRealmPriceComparison(array $itemsWithIlvl, array $realmSlugs, bool $force = false): array
     {
-        $this->syncRealmsToDbParallel($realmSlugs, $force);
+        set_time_limit(300);
+
+        $this->syncRealmsToDbParallel($realmSlugs, $force, skipSnapshot: true);
 
         $realmMeta = collect($realmSlugs)->mapWithKeys(
             fn($slug) => [$slug => $this->getConnectedRealmId($slug)]

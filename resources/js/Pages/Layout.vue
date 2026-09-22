@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { router } from '@inertiajs/vue3'
 import { Loader2 } from '@lucide/vue'
+import { Notivue, Notification } from 'notivue'
 import InputText from './Components/InputText.vue';
 import CustomSelect from './Components/CustomSelect.vue';
 import TimeAgoBadge from './Components/TimeAgoBadge.vue';
@@ -56,6 +57,35 @@ function onRefresh() {
 </script>
 
 <template>
+  <Notivue v-slot="item">
+    <div v-if="item.props?.confirmDelete"
+      class="w-80 rounded-xl border border-red-400/30 bg-[#12142b] p-4 shadow-xl">
+      <div class="mb-3">
+        <p class="text-sm font-semibold text-slate-100">
+          {{ item.title }}
+        </p>
+
+        <p class="mt-1 text-xs leading-relaxed text-slate-400">
+          {{ item.message }}
+        </p>
+      </div>
+
+      <div class="flex justify-end gap-2">
+        <button type="button" @click="item.clear()"
+          class="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white">
+          Cancelar
+        </button>
+
+        <button type="button" @click="item.props.onConfirm(item)"
+          class="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 transition-colors hover:border-red-400/70 hover:bg-red-500/20">
+          Eliminar
+        </button>
+      </div>
+    </div>
+
+    <Notification v-else :item="item" />
+  </Notivue>
+
   <div v-if="isLoadingAuctions"
     class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#0b0d1f]/80 backdrop-blur-sm">
     <Loader2 class="size-8 animate-spin text-indigo-400" />
