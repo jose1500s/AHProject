@@ -90,9 +90,12 @@ const selectedRealmsArbitrageSearch = ref('')
 const selectedRealmsBuyFilter = ref('')
 const selectedRealmsSellFilter = ref('')
 const selectedRealmsQualityFilter = ref('')
+const selectedRealmsIlvlFilter = ref('')
+
 const selectedRealmsBuyMenuOpen = ref(false)
 const selectedRealmsSellMenuOpen = ref(false)
 const selectedRealmsQualityMenuOpen = ref(false)
+const selectedRealmsIlvlMenuOpen = ref(false)
 
 const { realm } = useRealmSelection(props.realms)
 
@@ -143,7 +146,7 @@ onMounted(() => {
         if (stored) {
             selectedItems.value = JSON.parse(stored)
         }
-    } catch {}
+    } catch { }
 
     try {
         const storedFavorites = localStorage.getItem(FAVORITES_KEY)
@@ -153,7 +156,7 @@ onMounted(() => {
                 JSON.parse(storedFavorites)
             )
         }
-    } catch {}
+    } catch { }
 
     try {
         const storedGroups = localStorage.getItem(
@@ -167,7 +170,7 @@ onMounted(() => {
                 groups.value = parsedGroups
             }
         }
-    } catch {}
+    } catch { }
 })
 
 watch(
@@ -178,7 +181,7 @@ watch(
                 STORAGE_KEY,
                 JSON.stringify(val)
             )
-        } catch {}
+        } catch { }
     },
     { deep: true }
 )
@@ -191,7 +194,7 @@ watch(
                 FAVORITES_KEY,
                 JSON.stringify([...val])
             )
-        } catch {}
+        } catch { }
     },
     { deep: true }
 )
@@ -204,7 +207,7 @@ watch(
                 GROUPS_STORAGE_KEY,
                 JSON.stringify(val)
             )
-        } catch {}
+        } catch { }
     },
     { deep: true }
 )
@@ -417,6 +420,16 @@ function removeItem(id, ilvl) {
                     i.id === id &&
                     i.ilvl === ilvl
                 )
+        )
+}
+
+function removeItemsWithoutIlvl() {
+    selectedItems.value =
+        selectedItems.value.filter(
+            item =>
+                item.ilvl !== null &&
+                item.ilvl !== undefined &&
+                Number(item.ilvl) !== 1
         )
 }
 
@@ -784,7 +797,7 @@ function computeArbitrageFromRows(
             pricesBySlug.reduce(
                 (a, b) =>
                     b.copper <
-                    a.copper
+                        a.copper
                         ? b
                         : a
             )
@@ -793,7 +806,7 @@ function computeArbitrageFromRows(
             pricesBySlug.reduce(
                 (a, b) =>
                     b.copper >
-                    a.copper
+                        a.copper
                         ? b
                         : a
             )
@@ -1022,20 +1035,21 @@ const selectedRealmsSellOptions =
         ].sort()
     )
 
-const selectedRealmsQualityOptions =
-    computed(() =>
-        [
-            ...new Set(
-                selectedRealmsArbitrageOpportunities.value
-                    .map(
-                        o =>
-                            o.row
-                                .quality
-                    )
-                    .filter(Boolean)
-            ),
-        ]
-    )
+const selectedRealmsIlvlOptions = computed(() =>
+    [
+        ...new Set(
+            selectedRealmsArbitrageOpportunities.value
+                .map(o => o.row.ilvl)
+                .filter(
+                    ilvl =>
+                        ilvl !== null &&
+                        ilvl !== undefined &&
+                        Number(ilvl) !== 1
+                )
+                .map(Number)
+        ),
+    ].sort((a, b) => a - b)
+)
 
 function selectSelectedRealmsBuyFilter(
     slug
@@ -1067,6 +1081,11 @@ function selectSelectedRealmsQualityFilter(
         false
 }
 
+function selectSelectedRealmsIlvlFilter(ilvl) {
+    selectedRealmsIlvlFilter.value = ilvl
+    selectedRealmsIlvlMenuOpen.value = false
+}
+
 function closeSelectedRealmsBuyMenuOnBlur() {
     setTimeout(() => {
         selectedRealmsBuyMenuOpen.value =
@@ -1085,6 +1104,12 @@ function closeSelectedRealmsQualityMenuOnBlur() {
     setTimeout(() => {
         selectedRealmsQualityMenuOpen.value =
             false
+    }, 150)
+}
+
+function closeSelectedRealmsIlvlMenuOnBlur() {
+    setTimeout(() => {
+        selectedRealmsIlvlMenuOpen.value = false
     }, 150)
 }
 
@@ -1120,6 +1145,13 @@ const filteredSelectedRealmsArbitrage =
                 o =>
                     o.row.quality ===
                     selectedRealmsQualityFilter.value
+            )
+        }
+        if (selectedRealmsIlvlFilter.value) {
+            list = list.filter(
+                o =>
+                    Number(o.row.ilvl) ===
+                    Number(selectedRealmsIlvlFilter.value)
             )
         }
 
@@ -1162,7 +1194,7 @@ function timeAgo(dateStr) {
         Math.floor(
             (Date.now() -
                 new Date(dateStr)) /
-                60000
+            60000
         )
 
     if (diffMinutes < 1) {
@@ -1204,55 +1236,35 @@ const QUALITY_COLORS = {
                 Realm Price Comparison
             </h2>
 
-            <RefreshButton
-                v-if="rows.length || loading"
-                :loading="loading"
-                @click="fetchComparison(true)"
-            />
+            <RefreshButton v-if="rows.length || loading" :loading="loading" @click="fetchComparison(true)" />
         </div>
 
         <!-- SELECTORES -->
         <div class="grid grid-cols-2 gap-6">
             <ItemPicker v-model="selectedItems" />
 
-            <RealmMultiSelect
-                :model-value="selectedRealms"
-                @update:model-value="onRealmsChange"
-                :realms="realms"
-            />
+            <RealmMultiSelect :model-value="selectedRealms" @update:model-value="onRealmsChange" :realms="realms" />
         </div>
 
         <!-- SEARCH + GROUPS -->
-        <div
-            v-if="selectedItems.length && selectedRealms.length"
-            class="mt-4 flex items-center justify-center gap-2"
-        >
+        <div v-if="selectedItems.length && selectedRealms.length" class="mt-4 flex items-center justify-center gap-2">
             <!-- SEARCH -->
             <div class="relative w-1/3">
-                <Search
-                    class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500"
-                />
+                <Search class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
 
-                <input
-                    v-model="tableSearch"
-                    type="text"
-                    placeholder="Buscar en la tabla..."
-                    class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-md text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60 focus:bg-white/10 text-center"
-                />
+                <input v-model="tableSearch" type="text" placeholder="Buscar en la tabla..."
+                    class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-md text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60 focus:bg-white/10 text-center" />
             </div>
 
             <!-- GROUPS -->
             <div class="groups-menu-container relative">
 
-                <button
-                    type="button"
-                    @click.stop="groupMenuOpen = !groupMenuOpen"
+                <button type="button" @click.stop="groupMenuOpen = !groupMenuOpen"
                     class="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium text-slate-300 transition hover:border-indigo-400/50 hover:bg-white/10 hover:text-white"
                     :class="{
                         'border-indigo-400/50 text-indigo-300':
                             activeGroupId
-                    }"
-                >
+                    }">
                     <Folder class="size-3.5" />
 
                     <span>
@@ -1263,10 +1275,7 @@ const QUALITY_COLORS = {
                         }}
                     </span>
 
-                    <span
-                        v-if="activeGroupId"
-                        class="rounded-full bg-indigo-500/20 px-1.5 text-[10px] text-indigo-300"
-                    >
+                    <span v-if="activeGroupId" class="rounded-full bg-indigo-500/20 px-1.5 text-[10px] text-indigo-300">
                         {{
                             activeGroupId === '__ungrouped__'
                                 ? ungroupedItemCount
@@ -1276,11 +1285,8 @@ const QUALITY_COLORS = {
                 </button>
 
                 <!-- GROUP MENU -->
-                <div
-                    v-if="groupMenuOpen"
-                    @click.stop
-                    class="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-xl border border-indigo-400/20 bg-[#12142b]/95 shadow-[0_0_25px_3px_rgba(99,102,241,0.12)] backdrop-blur-xl"
-                >
+                <div v-if="groupMenuOpen" @click.stop
+                    class="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-xl border border-indigo-400/20 bg-[#12142b]/95 shadow-[0_0_25px_3px_rgba(99,102,241,0.12)] backdrop-blur-xl">
 
                     <div class="border-b border-white/10 px-3 py-2">
                         <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
@@ -1289,16 +1295,12 @@ const QUALITY_COLORS = {
                     </div>
 
                     <!-- ALL -->
-                    <button
-                        type="button"
-                        @click="clearGroupFilter(); groupMenuOpen = false"
+                    <button type="button" @click="clearGroupFilter(); groupMenuOpen = false"
                         class="flex w-full items-center justify-between px-3 py-2 text-left text-xs transition hover:bg-white/5"
-                        :class="
-                            !activeGroupId
-                                ? 'bg-indigo-500/15 text-indigo-300'
-                                : 'text-slate-300'
-                        "
-                    >
+                        :class="!activeGroupId
+                            ? 'bg-indigo-500/15 text-indigo-300'
+                            : 'text-slate-300'
+                            ">
                         <span class="flex items-center gap-2">
                             <Folder class="size-3.5" />
                             Todos los objetos
@@ -1310,16 +1312,12 @@ const QUALITY_COLORS = {
                     </button>
 
                     <!-- UNGROUPED -->
-                    <button
-                        type="button"
-                        @click="selectGroup('__ungrouped__')"
+                    <button type="button" @click="selectGroup('__ungrouped__')"
                         class="flex w-full items-center justify-between px-3 py-2 text-left text-xs transition hover:bg-white/5"
-                        :class="
-                            activeGroupId === '__ungrouped__'
-                                ? 'bg-indigo-500/15 text-indigo-300'
-                                : 'text-slate-300'
-                        "
-                    >
+                        :class="activeGroupId === '__ungrouped__'
+                            ? 'bg-indigo-500/15 text-indigo-300'
+                            : 'text-slate-300'
+                            ">
                         <span class="flex items-center gap-2">
                             <Folder class="size-3.5 text-slate-500" />
                             Sin grupo
@@ -1331,44 +1329,25 @@ const QUALITY_COLORS = {
                     </button>
 
                     <!-- GROUP LIST -->
-                    <div
-                        v-if="groups.length"
-                        class="max-h-64 overflow-y-auto border-t border-white/10"
-                    >
-                        <div
-                            v-for="group in groups"
-                            :key="group.id"
-                            class="group-row flex items-center gap-1"
-                            :class="
-                                activeGroupId === group.id
-                                    ? 'bg-indigo-500/10'
-                                    : ''
-                            "
-                        >
+                    <div v-if="groups.length" class="max-h-64 overflow-y-auto border-t border-white/10">
+                        <div v-for="group in groups" :key="group.id" class="group-row flex items-center gap-1" :class="activeGroupId === group.id
+                            ? 'bg-indigo-500/10'
+                            : ''
+                            ">
                             <!-- EDITING -->
                             <template v-if="editingGroupId === group.id">
                                 <div class="flex flex-1 items-center gap-1 px-2 py-1.5">
-                                    <input
-                                        v-model="editingGroupName"
-                                        @keyup.enter="saveEditingGroup(group)"
-                                        @keyup.esc="cancelEditingGroup"
-                                        autofocus
-                                        class="min-w-0 flex-1 rounded border border-indigo-400/40 bg-white/5 px-2 py-1 text-xs text-slate-100 outline-none"
-                                    />
+                                    <input v-model="editingGroupName" @keyup.enter="saveEditingGroup(group)"
+                                        @keyup.esc="cancelEditingGroup" autofocus
+                                        class="min-w-0 flex-1 rounded border border-indigo-400/40 bg-white/5 px-2 py-1 text-xs text-slate-100 outline-none" />
 
-                                    <button
-                                        type="button"
-                                        @click="saveEditingGroup(group)"
-                                        class="rounded p-1 text-emerald-400 hover:bg-white/10"
-                                    >
+                                    <button type="button" @click="saveEditingGroup(group)"
+                                        class="rounded p-1 text-emerald-400 hover:bg-white/10">
                                         <Check class="size-3" />
                                     </button>
 
-                                    <button
-                                        type="button"
-                                        @click="cancelEditingGroup"
-                                        class="rounded p-1 text-slate-500 hover:bg-white/10 hover:text-white"
-                                    >
+                                    <button type="button" @click="cancelEditingGroup"
+                                        class="rounded p-1 text-slate-500 hover:bg-white/10 hover:text-white">
                                         <X class="size-3" />
                                     </button>
                                 </div>
@@ -1376,11 +1355,8 @@ const QUALITY_COLORS = {
 
                             <!-- NORMAL -->
                             <template v-else>
-                                <button
-                                    type="button"
-                                    @click="selectGroup(group.id)"
-                                    class="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-white/5"
-                                >
+                                <button type="button" @click="selectGroup(group.id)"
+                                    class="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-white/5">
                                     <span class="flex min-w-0 items-center gap-2">
                                         <Folder class="size-3.5 shrink-0 text-indigo-400" />
 
@@ -1394,21 +1370,15 @@ const QUALITY_COLORS = {
                                     </span>
                                 </button>
 
-                                <button
-                                    type="button"
-                                    @click.stop="startEditingGroup(group)"
+                                <button type="button" @click.stop="startEditingGroup(group)"
                                     class="mr-0.5 rounded p-1 text-slate-600 hover:bg-white/10 hover:text-slate-300"
-                                    title="Renombrar grupo"
-                                >
+                                    title="Renombrar grupo">
                                     <Pencil class="size-3" />
                                 </button>
 
-                                <button
-                                    type="button"
-                                    @click.stop="deleteGroup(group.id)"
+                                <button type="button" @click.stop="deleteGroup(group.id)"
                                     class="mr-1 rounded p-1 text-slate-600 hover:bg-red-500/10 hover:text-red-400"
-                                    title="Eliminar grupo"
-                                >
+                                    title="Eliminar grupo">
                                     <Trash2 class="size-3" />
                                 </button>
                             </template>
@@ -1420,53 +1390,43 @@ const QUALITY_COLORS = {
 
                         <template v-if="showCreateGroup">
                             <div class="flex items-center gap-1">
-                                <input
-                                    v-model="newGroupName"
-                                    @keyup.enter="createGroup"
-                                    @keyup.esc="showCreateGroup = false"
-                                    autofocus
-                                    type="text"
+                                <input v-model="newGroupName" @keyup.enter="createGroup"
+                                    @keyup.esc="showCreateGroup = false" autofocus type="text"
                                     placeholder="Nombre del grupo..."
-                                    class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 outline-none focus:border-indigo-400/50"
-                                />
+                                    class="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 outline-none focus:border-indigo-400/50" />
 
-                                <button
-                                    type="button"
-                                    @click="createGroup"
-                                    class="rounded-lg bg-indigo-500/20 p-1.5 text-indigo-300 transition hover:bg-indigo-500/30"
-                                >
+                                <button type="button" @click="createGroup"
+                                    class="rounded-lg bg-indigo-500/20 p-1.5 text-indigo-300 transition hover:bg-indigo-500/30">
                                     <Check class="size-3.5" />
                                 </button>
 
-                                <button
-                                    type="button"
-                                    @click="showCreateGroup = false; newGroupName = ''"
-                                    class="rounded-lg p-1.5 text-slate-500 hover:bg-white/5 hover:text-white"
-                                >
+                                <button type="button" @click="showCreateGroup = false; newGroupName = ''"
+                                    class="rounded-lg p-1.5 text-slate-500 hover:bg-white/5 hover:text-white">
                                     <X class="size-3.5" />
                                 </button>
                             </div>
                         </template>
 
-                        <button
-                            v-else
-                            type="button"
-                            @click="showCreateGroup = true"
-                            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/10 hover:text-indigo-200"
-                        >
+                        <button v-else type="button" @click="showCreateGroup = true"
+                            class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/10 hover:text-indigo-200">
                             <FolderPlus class="size-3.5" />
                             Crear grupo
                         </button>
                     </div>
                 </div>
             </div>
+            <!-- REMOVE ITEMS WITHOUT ILVL -->
+            <button type="button" @click="removeItemsWithoutIlvl"
+                class="flex items-center gap-2 rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-1.5 text-sm font-medium text-red-300 transition hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-200"
+                title="Eliminar todos los items sin ilvl">
+                <Trash2 class="size-3.5" />
+                Eliminar items sin ilvl
+            </button>
         </div>
 
         <!-- TABLE -->
-        <div
-            v-if="selectedItems.length && selectedRealms.length"
-            class="mt-3 overflow-x-auto rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-md"
-        >
+        <div v-if="selectedItems.length && selectedRealms.length"
+            class="mt-3 overflow-x-auto rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-md">
             <div class="app-scroll max-h-[28rem] overflow-y-auto">
 
                 <table class="w-full text-sm">
@@ -1479,11 +1439,7 @@ const QUALITY_COLORS = {
                                 Item
                             </th>
 
-                            <th
-                                v-for="slug in selectedRealms"
-                                :key="slug"
-                                class="px-4 py-2.5 text-left"
-                            >
+                            <th v-for="slug in selectedRealms" :key="slug" class="px-4 py-2.5 text-left">
                                 <div class="flex items-center gap-1.5">
 
                                     <span>
@@ -1506,11 +1462,8 @@ const QUALITY_COLORS = {
                                         }}
                                     </span>
 
-                                    <button
-                                        type="button"
-                                        @click="removeRealm(slug)"
-                                        class="shrink-0 text-slate-500 hover:text-red-400"
-                                    >
+                                    <button type="button" @click="removeRealm(slug)"
+                                        class="shrink-0 text-slate-500 hover:text-red-400">
                                         <X class="size-3" />
                                     </button>
 
@@ -1526,15 +1479,10 @@ const QUALITY_COLORS = {
                         <!-- LOADING -->
                         <tr v-if="loading">
 
-                            <td
-                                :colspan="selectedRealms.length + 1"
-                                class="py-16 text-center"
-                            >
+                            <td :colspan="selectedRealms.length + 1" class="py-16 text-center">
                                 <div class="flex flex-col items-center gap-2 text-slate-500">
 
-                                    <Loader2
-                                        class="size-6 animate-spin text-indigo-400"
-                                    />
+                                    <Loader2 class="size-6 animate-spin text-indigo-400" />
 
                                     <span class="text-sm">
                                         Actualizando precios...
@@ -1548,10 +1496,7 @@ const QUALITY_COLORS = {
                         <!-- EMPTY -->
                         <tr v-else-if="!filteredRows.length">
 
-                            <td
-                                :colspan="selectedRealms.length + 1"
-                                class="px-4 py-6 text-center text-slate-500"
-                            >
+                            <td :colspan="selectedRealms.length + 1" class="px-4 py-6 text-center text-slate-500">
                                 {{
                                     activeGroupId
                                         ? 'No hay objetos en este grupo que coincidan con la búsqueda.'
@@ -1564,62 +1509,35 @@ const QUALITY_COLORS = {
                         <!-- ROWS -->
                         <template v-else>
 
-                            <tr
-                                v-for="row in filteredRows"
-                                :key="`${row.item_id}-${row.ilvl}`"
-                                class="border-t border-white/5 align-top"
-                                :class="
-                                    favorites.has(
-                                        favoriteKey(row)
-                                    )
-                                        ? 'bg-amber-400/4'
-                                        : ''
-                                "
-                            >
+                            <tr v-for="row in filteredRows" :key="`${row.item_id}-${row.ilvl}`"
+                                class="border-t border-white/5 align-top" :class="favorites.has(
+                                    favoriteKey(row)
+                                )
+                                    ? 'bg-amber-400/4'
+                                    : ''
+                                    ">
 
                                 <!-- ITEM -->
-                                <td
-                                    class="px-4 py-2.5 cursor-pointer hover:bg-white/3"
-                                    @click="openItemDetail(row)"
-                                >
+                                <td class="px-4 py-2.5 cursor-pointer hover:bg-white/3" @click="openItemDetail(row)">
 
-                                    <span
-                                        class="flex items-center gap-2"
-                                        :class="
-                                            QUALITY_COLORS[row.quality]
-                                                ?? 'text-slate-100'
-                                        "
-                                    >
+                                    <span class="flex items-center gap-2" :class="QUALITY_COLORS[row.quality]
+                                        ?? 'text-slate-100'
+                                        ">
 
                                         <!-- FAVORITE -->
-                                        <button
-                                            type="button"
-                                            @click.stop="toggleFavorite(row)"
-                                            class="shrink-0"
-                                        >
-                                            <Star
-                                                class="size-4 transition-colors"
-                                                :class="
-                                                    favorites.has(
-                                                        favoriteKey(row)
-                                                    )
-                                                        ? 'fill-amber-400 text-amber-400'
-                                                        : 'text-slate-600 hover:text-slate-400'
-                                                "
-                                            />
+                                        <button type="button" @click.stop="toggleFavorite(row)" class="shrink-0">
+                                            <Star class="size-4 transition-colors" :class="favorites.has(
+                                                favoriteKey(row)
+                                            )
+                                                ? 'fill-amber-400 text-amber-400'
+                                                : 'text-slate-600 hover:text-slate-400'
+                                                " />
                                         </button>
 
                                         <!-- ICON -->
-                                        <img
-                                            v-if="row.icon_url"
-                                            :src="row.icon_url"
-                                            class="size-5 rounded shrink-0"
-                                        />
+                                        <img v-if="row.icon_url" :src="row.icon_url" class="size-5 rounded shrink-0" />
 
-                                        <Sparkles
-                                            v-else
-                                            class="size-5 shrink-0"
-                                        />
+                                        <Sparkles v-else class="size-5 shrink-0" />
 
                                         <!-- NAME -->
                                         <span class="truncate">
@@ -1628,8 +1546,7 @@ const QUALITY_COLORS = {
 
                                         <!-- ILVL -->
                                         <span
-                                            class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100"
-                                        >
+                                            class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100">
                                             {{
                                                 row.ilvl !== null
                                                     ? `ilvl ${row.ilvl}`
@@ -1638,38 +1555,26 @@ const QUALITY_COLORS = {
                                         </span>
 
                                         <!-- GROUP BUTTON -->
-                                        <div
-                                            class="item-group-menu-container relative shrink-0"
-                                        >
+                                        <div class="item-group-menu-container relative shrink-0">
 
-                                            <button
-                                                type="button"
-                                                @click.stop="toggleItemGroupMenu(row)"
-                                                class="rounded p-1 transition"
-                                                :class="
-                                                    isItemInAnyGroup(row)
-                                                        ? 'text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300'
-                                                        : 'text-slate-600 hover:bg-white/5 hover:text-slate-300'
-                                                "
-                                                title="Agregar a grupo"
-                                            >
-                                                <Folder
-                                                    class="size-3.5"
-                                                />
+                                            <button type="button" @click.stop="toggleItemGroupMenu(row)"
+                                                class="rounded p-1 transition" :class="isItemInAnyGroup(row)
+                                                    ? 'text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-300'
+                                                    : 'text-slate-600 hover:bg-white/5 hover:text-slate-300'
+                                                    " title="Agregar a grupo">
+                                                <Folder class="size-3.5" />
                                             </button>
 
                                             <!-- ITEM GROUP POPOVER -->
-                                            <div
-                                                v-if="
-                                                    itemGroupMenu ===
-                                                    groupItemKey(row)
-                                                "
-                                                @click.stop
-                                                class="absolute left-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-xl border border-indigo-400/20 bg-[#12142b]/95 shadow-[0_0_25px_3px_rgba(99,102,241,0.15)] backdrop-blur-xl"
-                                            >
+                                            <div v-if="
+                                                itemGroupMenu ===
+                                                groupItemKey(row)
+                                            " @click.stop
+                                                class="absolute left-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-xl border border-indigo-400/20 bg-[#12142b]/95 shadow-[0_0_25px_3px_rgba(99,102,241,0.15)] backdrop-blur-xl">
 
                                                 <div class="border-b border-white/10 px-3 py-2">
-                                                    <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                                                    <div
+                                                        class="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                                                         Agregar a grupos
                                                     </div>
 
@@ -1679,36 +1584,22 @@ const QUALITY_COLORS = {
                                                 </div>
 
                                                 <!-- GROUPS -->
-                                                <div
-                                                    v-if="groups.length"
-                                                    class="max-h-56 overflow-y-auto"
-                                                >
+                                                <div v-if="groups.length" class="max-h-56 overflow-y-auto">
 
-                                                    <button
-                                                        v-for="group in groups"
-                                                        :key="group.id"
-                                                        type="button"
+                                                    <button v-for="group in groups" :key="group.id" type="button"
                                                         @click="toggleItemInGroup(row, group)"
-                                                        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-white/5"
-                                                    >
+                                                        class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-white/5">
 
                                                         <span
                                                             class="flex size-4 shrink-0 items-center justify-center rounded border"
-                                                            :class="
-                                                                isItemInGroup(row, group)
-                                                                    ? 'border-indigo-400 bg-indigo-500/30 text-indigo-200'
-                                                                    : 'border-white/15 text-transparent'
-                                                            "
-                                                        >
-                                                            <Check
-                                                                v-if="isItemInGroup(row, group)"
-                                                                class="size-3"
-                                                            />
+                                                            :class="isItemInGroup(row, group)
+                                                                ? 'border-indigo-400 bg-indigo-500/30 text-indigo-200'
+                                                                : 'border-white/15 text-transparent'
+                                                                ">
+                                                            <Check v-if="isItemInGroup(row, group)" class="size-3" />
                                                         </span>
 
-                                                        <Folder
-                                                            class="size-3.5 shrink-0 text-indigo-400"
-                                                        />
+                                                        <Folder class="size-3.5 shrink-0 text-indigo-400" />
 
                                                         <span class="truncate text-slate-300">
                                                             {{ group.name }}
@@ -1719,21 +1610,15 @@ const QUALITY_COLORS = {
                                                 </div>
 
                                                 <!-- NO GROUPS -->
-                                                <div
-                                                    v-else
-                                                    class="px-3 py-4 text-center text-xs text-slate-500"
-                                                >
+                                                <div v-else class="px-3 py-4 text-center text-xs text-slate-500">
                                                     Todavía no tienes grupos.
                                                 </div>
 
                                                 <!-- CREATE GROUP -->
                                                 <div class="border-t border-white/10 p-2">
 
-                                                    <button
-                                                        type="button"
-                                                        @click="createGroupFromItem"
-                                                        class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/10"
-                                                    >
+                                                    <button type="button" @click="createGroupFromItem"
+                                                        class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/10">
                                                         <Plus class="size-3.5" />
                                                         Crear grupo
                                                     </button>
@@ -1745,11 +1630,8 @@ const QUALITY_COLORS = {
                                         </div>
 
                                         <!-- REMOVE -->
-                                        <button
-                                            type="button"
-                                            @click.stop="removeItem(row.item_id, row.ilvl)"
-                                            class="shrink-0 text-slate-500 hover:text-red-400"
-                                        >
+                                        <button type="button" @click.stop="removeItem(row.item_id, row.ilvl)"
+                                            class="shrink-0 text-slate-500 hover:text-red-400">
                                             <X class="size-3.5" />
                                         </button>
 
@@ -1758,56 +1640,40 @@ const QUALITY_COLORS = {
                                 </td>
 
                                 <!-- REALM PRICES -->
-                                <td
-                                    v-for="slug in selectedRealms"
-                                    :key="slug"
-                                    class="px-4 py-2.5"
-                                >
+                                <td v-for="slug in selectedRealms" :key="slug" class="px-4 py-2.5">
 
-                                    <template
-                                        v-if="
-                                            row.prices[slug]?.length
-                                        "
-                                    >
+                                    <template v-if="
+                                        row.prices[slug]?.length
+                                    ">
 
-                                        <button
-                                            type="button"
-                                            @click="
-                                                toggleCell(
-                                                    cellKey(
-                                                        row,
-                                                        slug
-                                                    )
+                                        <button type="button" @click="
+                                            toggleCell(
+                                                cellKey(
+                                                    row,
+                                                    slug
                                                 )
+                                            )
                                             "
-                                            class="inline-flex items-center gap-1 rounded hover:bg-white/5 px-1 py-0.5"
-                                        >
+                                            class="inline-flex items-center gap-1 rounded hover:bg-white/5 px-1 py-0.5">
 
-                                            <span
-                                                class="inline-flex items-center gap-0.5 text-amber-400 font-semibold"
-                                            >
+                                            <span class="inline-flex items-center gap-0.5 text-amber-400 font-semibold">
                                                 <span class="size-2 rounded-full bg-amber-400"></span>
                                                 {{
                                                     row.prices[slug][0].gold
                                                 }}
                                             </span>
 
-                                            <span
-                                                class="inline-flex items-center gap-0.5 text-slate-300 font-semibold"
-                                            >
+                                            <span class="inline-flex items-center gap-0.5 text-slate-300 font-semibold">
                                                 <span class="size-2 rounded-full bg-slate-300"></span>
                                                 {{
                                                     row.prices[slug][0].silver
                                                 }}
                                             </span>
 
-                                            <span
-                                                v-if="
-                                                    row.prices[slug].length >
-                                                    1
-                                                "
-                                                class="ml-1 text-[10px] text-slate-500"
-                                            >
+                                            <span v-if="
+                                                row.prices[slug].length >
+                                                1
+                                            " class="ml-1 text-[10px] text-slate-500">
                                                 +{{
                                                     row.prices[slug].length -
                                                     1
@@ -1817,37 +1683,27 @@ const QUALITY_COLORS = {
                                         </button>
 
                                         <!-- ADDITIONAL PRICES -->
-                                        <div
-                                            v-if="
-                                                openCells.has(
-                                                    cellKey(
-                                                        row,
-                                                        slug
-                                                    )
+                                        <div v-if="
+                                            openCells.has(
+                                                cellKey(
+                                                    row,
+                                                    slug
                                                 )
-                                            "
-                                            class="mt-1 flex flex-col gap-1 border-l border-white/10 pl-2"
-                                        >
+                                            )
+                                        " class="mt-1 flex flex-col gap-1 border-l border-white/10 pl-2">
 
-                                            <span
-                                                v-for="(
-                                                    price,
-                                                    i
-                                                ) in row.prices[slug].slice(1)"
-                                                :key="i"
-                                                class="inline-flex items-center gap-1 text-xs"
-                                            >
+                                            <span v-for="(
+price,
+    i
+                                                ) in row.prices[slug].slice(1)" :key="i"
+                                                class="inline-flex items-center gap-1 text-xs">
 
-                                                <span
-                                                    class="inline-flex items-center gap-0.5 text-amber-400/80"
-                                                >
+                                                <span class="inline-flex items-center gap-0.5 text-amber-400/80">
                                                     <span class="size-1.5 rounded-full bg-amber-400"></span>
                                                     {{ price.gold }}
                                                 </span>
 
-                                                <span
-                                                    class="inline-flex items-center gap-0.5 text-slate-400"
-                                                >
+                                                <span class="inline-flex items-center gap-0.5 text-slate-400">
                                                     <span class="size-1.5 rounded-full bg-slate-300"></span>
                                                     {{ price.silver }}
                                                 </span>
@@ -1858,10 +1714,7 @@ const QUALITY_COLORS = {
 
                                     </template>
 
-                                    <span
-                                        v-else
-                                        class="text-slate-600"
-                                    >
+                                    <span v-else class="text-slate-600">
                                         —
                                     </span>
 
@@ -1879,13 +1732,10 @@ const QUALITY_COLORS = {
         </div>
 
         <!-- SELECTED REALMS ARBITRAGE -->
-        <div
-            v-if="
-                selectedItems.length &&
-                selectedRealms.length >= 2
-            "
-            class="mt-5 border-t border-white/10 pt-5"
-        >
+        <div v-if="
+            selectedItems.length &&
+            selectedRealms.length >= 2
+        " class="mt-5 border-t border-white/10 pt-5">
 
             <div class="mb-3">
 
@@ -1906,19 +1756,13 @@ const QUALITY_COLORS = {
 
             </div>
 
-            <div
-                v-if="
-                    !selectedRealmsArbitrageOpportunities.length
-                "
-                class="rounded-lg border border-white/5 bg-white/3 py-8 text-center text-sm text-slate-500"
-            >
+            <div v-if="
+                !selectedRealmsArbitrageOpportunities.length
+            " class="rounded-lg border border-white/5 bg-white/3 py-8 text-center text-sm text-slate-500">
                 No se encontraron oportunidades de arbitraje rentables entre los reinos seleccionados.
             </div>
 
-            <div
-                v-else
-                class="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-4"
-            >
+            <div v-else class="rounded-xl border border-cyan-400/20 bg-cyan-500/5 p-4">
 
                 <div class="mb-3 flex items-center justify-between">
 
@@ -1961,15 +1805,10 @@ const QUALITY_COLORS = {
                 <div class="relative mb-3 w-full max-w-sm">
 
                     <Search
-                        class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500"
-                    />
+                        class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
 
-                    <input
-                        v-model="selectedRealmsArbitrageSearch"
-                        type="text"
-                        placeholder="Filtrar oportunidades..."
-                        class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-cyan-400/60"
-                    />
+                    <input v-model="selectedRealmsArbitrageSearch" type="text" placeholder="Filtrar oportunidades..."
+                        class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-cyan-400/60" />
 
                 </div>
 
@@ -1977,7 +1816,8 @@ const QUALITY_COLORS = {
 
                     <table class="w-full text-sm">
 
-                        <thead class="sticky top-0 z-10 bg-[#181b3a] text-[11px] uppercase tracking-wider text-slate-500">
+                        <thead
+                            class="sticky top-0 z-10 bg-[#181b3a] text-[11px] uppercase tracking-wider text-slate-500">
 
                             <tr>
 
@@ -1987,61 +1827,47 @@ const QUALITY_COLORS = {
 
                                         <div class="relative">
 
-                                            <button
-                                                type="button"
-                                                @click="
-                                                    selectedRealmsQualityMenuOpen =
-                                                        !selectedRealmsQualityMenuOpen
-                                                "
-                                                @blur="
+                                            <button type="button" @click="
+                                                selectedRealmsQualityMenuOpen =
+                                                !selectedRealmsQualityMenuOpen
+                                                " @blur="
                                                     closeSelectedRealmsQualityMenuOnBlur
                                                 "
                                                 class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-cyan-300"
                                                 :class="{
                                                     'text-cyan-400':
                                                         selectedRealmsQualityFilter
-                                                }"
-                                            >
+                                                }">
                                                 <Filter class="size-3" />
                                             </button>
 
-                                            <div
-                                                v-if="
-                                                    selectedRealmsQualityMenuOpen
-                                                "
-                                                class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(34,211,238,0.15)]"
-                                            >
+                                            <div v-if="
+                                                selectedRealmsQualityMenuOpen
+                                            "
+                                                class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(34,211,238,0.15)]">
 
-                                                <div
-                                                    @mousedown="
-                                                        selectSelectedRealmsQualityFilter('')
-                                                    "
-                                                    class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                    :class="
-                                                        !selectedRealmsQualityFilter
-                                                            ? 'bg-cyan-500/15 text-cyan-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                    "
-                                                >
+                                                <div @mousedown="
+                                                    selectSelectedRealmsQualityFilter('')
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                    :class="!selectedRealmsQualityFilter
+                                                        ? 'bg-cyan-500/15 text-cyan-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                        ">
                                                     Todas las calidades
                                                 </div>
 
-                                                <div
-                                                    v-for="q in selectedRealmsQualityOptions"
-                                                    :key="q"
-                                                    @mousedown="
-                                                        selectSelectedRealmsQualityFilter(q)
+                                                <div v-for="q in selectedRealmsQualityOptions" :key="q" @mousedown="
+                                                    selectSelectedRealmsQualityFilter(q)
                                                     "
                                                     class="cursor-pointer px-3 py-2 text-xs capitalize transition-colors"
                                                     :class="[
                                                         QUALITY_COLORS[q] ??
-                                                            'text-slate-300',
+                                                        'text-slate-300',
                                                         selectedRealmsQualityFilter ===
                                                             q
                                                             ? 'bg-cyan-500/15'
                                                             : 'hover:bg-white/5'
-                                                    ]"
-                                                >
+                                                    ]">
                                                     {{ q }}
                                                 </div>
 
@@ -2058,59 +1884,43 @@ const QUALITY_COLORS = {
 
                                         <div class="relative">
 
-                                            <button
-                                                type="button"
-                                                @click="
-                                                    selectedRealmsBuyMenuOpen =
-                                                        !selectedRealmsBuyMenuOpen
-                                                "
-                                                @blur="
+                                            <button type="button" @click="
+                                                selectedRealmsBuyMenuOpen =
+                                                !selectedRealmsBuyMenuOpen
+                                                " @blur="
                                                     closeSelectedRealmsBuyMenuOnBlur
                                                 "
                                                 class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-cyan-300"
                                                 :class="{
                                                     'text-cyan-400':
                                                         selectedRealmsBuyFilter
-                                                }"
-                                            >
+                                                }">
                                                 <Filter class="size-3" />
                                             </button>
 
-                                            <div
-                                                v-if="
-                                                    selectedRealmsBuyMenuOpen
-                                                "
-                                                class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(34,211,238,0.15)]"
-                                            >
+                                            <div v-if="
+                                                selectedRealmsBuyMenuOpen
+                                            "
+                                                class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(34,211,238,0.15)]">
 
-                                                <div
-                                                    @mousedown="
-                                                        selectSelectedRealmsBuyFilter('')
-                                                    "
-                                                    class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                    :class="
-                                                        !selectedRealmsBuyFilter
-                                                            ? 'bg-cyan-500/15 text-cyan-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                    "
-                                                >
+                                                <div @mousedown="
+                                                    selectSelectedRealmsBuyFilter('')
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                    :class="!selectedRealmsBuyFilter
+                                                        ? 'bg-cyan-500/15 text-cyan-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                        ">
                                                     Todos los reinos
                                                 </div>
 
-                                                <div
-                                                    v-for="slug in selectedRealmsBuyOptions"
-                                                    :key="slug"
-                                                    @mousedown="
-                                                        selectSelectedRealmsBuyFilter(slug)
-                                                    "
-                                                    class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                    :class="
-                                                        selectedRealmsBuyFilter ===
+                                                <div v-for="slug in selectedRealmsBuyOptions" :key="slug" @mousedown="
+                                                    selectSelectedRealmsBuyFilter(slug)
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                    :class="selectedRealmsBuyFilter ===
                                                         slug
-                                                            ? 'bg-cyan-500/15 text-cyan-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                    "
-                                                >
+                                                        ? 'bg-cyan-500/15 text-cyan-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                        ">
                                                     {{ realmName(slug) }}
                                                 </div>
 
@@ -2131,59 +1941,43 @@ const QUALITY_COLORS = {
 
                                         <div class="relative">
 
-                                            <button
-                                                type="button"
-                                                @click="
-                                                    selectedRealmsSellMenuOpen =
-                                                        !selectedRealmsSellMenuOpen
-                                                "
-                                                @blur="
+                                            <button type="button" @click="
+                                                selectedRealmsSellMenuOpen =
+                                                !selectedRealmsSellMenuOpen
+                                                " @blur="
                                                     closeSelectedRealmsSellMenuOnBlur
                                                 "
                                                 class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-cyan-300"
                                                 :class="{
                                                     'text-cyan-400':
                                                         selectedRealmsSellFilter
-                                                }"
-                                            >
+                                                }">
                                                 <Filter class="size-3" />
                                             </button>
 
-                                            <div
-                                                v-if="
-                                                    selectedRealmsSellMenuOpen
-                                                "
-                                                class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(34,211,238,0.15)]"
-                                            >
+                                            <div v-if="
+                                                selectedRealmsSellMenuOpen
+                                            "
+                                                class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-cyan-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(34,211,238,0.15)]">
 
-                                                <div
-                                                    @mousedown="
-                                                        selectSelectedRealmsSellFilter('')
-                                                    "
-                                                    class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                    :class="
-                                                        !selectedRealmsSellFilter
-                                                            ? 'bg-cyan-500/15 text-cyan-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                    "
-                                                >
+                                                <div @mousedown="
+                                                    selectSelectedRealmsSellFilter('')
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                    :class="!selectedRealmsSellFilter
+                                                        ? 'bg-cyan-500/15 text-cyan-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                        ">
                                                     Todos los reinos
                                                 </div>
 
-                                                <div
-                                                    v-for="slug in selectedRealmsSellOptions"
-                                                    :key="slug"
-                                                    @mousedown="
-                                                        selectSelectedRealmsSellFilter(slug)
-                                                    "
-                                                    class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                    :class="
-                                                        selectedRealmsSellFilter ===
+                                                <div v-for="slug in selectedRealmsSellOptions" :key="slug" @mousedown="
+                                                    selectSelectedRealmsSellFilter(slug)
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                    :class="selectedRealmsSellFilter ===
                                                         slug
-                                                            ? 'bg-cyan-500/15 text-cyan-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                    "
-                                                >
+                                                        ? 'bg-cyan-500/15 text-cyan-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                        ">
                                                     {{ realmName(slug) }}
                                                 </div>
 
@@ -2208,40 +2002,28 @@ const QUALITY_COLORS = {
 
                         <tbody>
 
-                            <tr
-                                v-for="o in filteredSelectedRealmsArbitrage"
-                                :key="`${o.row.item_id}-${o.row.ilvl}`"
-                                class="border-t border-white/5"
-                            >
+                            <tr v-for="o in filteredSelectedRealmsArbitrage" :key="`${o.row.item_id}-${o.row.ilvl}`"
+                                class="border-t border-white/5">
 
                                 <td class="px-3 py-2">
 
-                                    <span
-                                        class="flex items-center gap-2"
-                                        :class="
-                                            QUALITY_COLORS[
-                                                o.row.quality
-                                            ] ??
-                                            'text-slate-100'
-                                        "
-                                    >
+                                    <span class="flex items-center gap-2" :class="QUALITY_COLORS[
+                                        o.row.quality
+                                    ] ??
+                                        'text-slate-100'
+                                        ">
 
-                                        <img
-                                            v-if="o.row.icon_url"
-                                            :src="o.row.icon_url"
-                                            class="size-6 shrink-0 rounded"
-                                        />
+                                        <img v-if="o.row.icon_url" :src="o.row.icon_url"
+                                            class="size-6 shrink-0 rounded" />
 
-                                        <Sparkles
-                                            v-else
-                                            class="size-6 shrink-0"
-                                        />
+                                        <Sparkles v-else class="size-6 shrink-0" />
 
                                         <span class="truncate">
                                             {{ o.row.name }}
                                         </span>
 
-                                        <span class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-semibold text-slate-100">
+                                        <span
+                                            class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-semibold text-slate-100">
                                             ilvl {{ o.row.ilvl }}
                                         </span>
 
@@ -2315,15 +2097,10 @@ const QUALITY_COLORS = {
 
                             </tr>
 
-                            <tr
-                                v-if="
-                                    !filteredSelectedRealmsArbitrage.length
-                                "
-                            >
-                                <td
-                                    colspan="6"
-                                    class="px-3 py-4 text-center text-slate-500"
-                                >
+                            <tr v-if="
+                                !filteredSelectedRealmsArbitrage.length
+                            ">
+                                <td colspan="6" class="px-3 py-4 text-center text-slate-500">
                                     Sin resultados
                                 </td>
                             </tr>
@@ -2345,10 +2122,7 @@ const QUALITY_COLORS = {
         </div>
 
         <!-- FIXED ARBITRAGE -->
-        <div
-            v-if="selectedItems.length"
-            class="mt-5 border-t border-white/10 pt-5"
-        >
+        <div v-if="selectedItems.length" class="mt-5 border-t border-white/10 pt-5">
 
             <div class="mb-3 flex items-center justify-between">
 
@@ -2371,21 +2145,13 @@ const QUALITY_COLORS = {
 
                 </div>
 
-                <button
-                    v-if="arbitrageStarted"
-                    type="button"
-                    @click="fetchArbitrage(true)"
-                    :disabled="arbitrageLoading"
-                    class="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                <button v-if="arbitrageStarted" type="button" @click="fetchArbitrage(true)" :disabled="arbitrageLoading"
+                    class="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
 
-                    <RefreshCw
-                        class="size-3.5"
-                        :class="{
-                            'animate-spin':
-                                arbitrageLoading
-                        }"
-                    />
+                    <RefreshCw class="size-3.5" :class="{
+                        'animate-spin':
+                            arbitrageLoading
+                    }" />
 
                     Actualizar
 
@@ -2393,12 +2159,8 @@ const QUALITY_COLORS = {
 
             </div>
 
-            <button
-                v-if="!arbitrageStarted"
-                type="button"
-                @click="fetchArbitrage(false)"
-                class="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300 transition-colors hover:border-indigo-400/70 hover:bg-indigo-500/20"
-            >
+            <button v-if="!arbitrageStarted" type="button" @click="fetchArbitrage(false)"
+                class="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300 transition-colors hover:border-indigo-400/70 hover:bg-indigo-500/20">
 
                 <RefreshCw class="size-4" />
 
@@ -2406,10 +2168,7 @@ const QUALITY_COLORS = {
 
             </button>
 
-            <div
-                v-else-if="arbitrageLoading"
-                class="py-8 text-center text-sm text-slate-500"
-            >
+            <div v-else-if="arbitrageLoading" class="py-8 text-center text-sm text-slate-500">
                 Comparando
                 {{ selectedItems.length }}
                 ítems entre
@@ -2419,17 +2178,12 @@ const QUALITY_COLORS = {
 
             <template v-else>
 
-                <div
-                    v-if="!arbitrageOpportunities.length"
-                    class="rounded-lg border border-white/5 bg-white/3 py-8 text-center text-sm text-slate-500"
-                >
+                <div v-if="!arbitrageOpportunities.length"
+                    class="rounded-lg border border-white/5 bg-white/3 py-8 text-center text-sm text-slate-500">
                     No se encontraron oportunidades de arbitraje rentables con los datos actuales.
                 </div>
 
-                <div
-                    v-else
-                    class="rounded-xl border border-indigo-400/20 bg-indigo-500/5 p-4"
-                >
+                <div v-else class="rounded-xl border border-indigo-400/20 bg-indigo-500/5 p-4">
 
                     <div class="mb-3 flex items-center justify-between">
 
@@ -2464,15 +2218,10 @@ const QUALITY_COLORS = {
                     <div class="relative mb-3 w-full max-w-sm">
 
                         <Search
-                            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500"
-                        />
+                            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
 
-                        <input
-                            v-model="arbitrageSearch"
-                            type="text"
-                            placeholder="Filtrar oportunidades..."
-                            class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60"
-                        />
+                        <input v-model="arbitrageSearch" type="text" placeholder="Filtrar oportunidades..."
+                            class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60" />
 
                     </div>
 
@@ -2480,7 +2229,8 @@ const QUALITY_COLORS = {
 
                         <table class="w-full text-sm">
 
-                            <thead class="sticky top-0 z-10 bg-[#181b3a] text-[11px] uppercase tracking-wider text-slate-500">
+                            <thead
+                                class="sticky top-0 z-10 bg-[#181b3a] text-[11px] uppercase tracking-wider text-slate-500">
 
                                 <tr>
 
@@ -2491,61 +2241,47 @@ const QUALITY_COLORS = {
 
                                             <div class="relative">
 
-                                                <button
-                                                    type="button"
-                                                    @click="
-                                                        arbitrageQualityMenuOpen =
-                                                            !arbitrageQualityMenuOpen
-                                                    "
-                                                    @blur="
+                                                <button type="button" @click="
+                                                    arbitrageQualityMenuOpen =
+                                                    !arbitrageQualityMenuOpen
+                                                    " @blur="
                                                         closeQualityMenuOnBlur
                                                     "
                                                     class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300"
                                                     :class="{
                                                         'text-indigo-400':
                                                             arbitrageQualityFilter
-                                                    }"
-                                                >
+                                                    }">
                                                     <Filter class="size-3" />
                                                 </button>
 
-                                                <div
-                                                    v-if="
-                                                        arbitrageQualityMenuOpen
-                                                    "
-                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]"
-                                                >
+                                                <div v-if="
+                                                    arbitrageQualityMenuOpen
+                                                "
+                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
 
-                                                    <div
-                                                        @mousedown="
-                                                            selectQualityFilter('')
-                                                        "
-                                                        class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="
-                                                            !arbitrageQualityFilter
-                                                                ? 'bg-indigo-500/15 text-indigo-300'
-                                                                : 'text-slate-300 hover:bg-white/5'
-                                                        "
-                                                    >
+                                                    <div @mousedown="
+                                                        selectQualityFilter('')
+                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                        :class="!arbitrageQualityFilter
+                                                            ? 'bg-indigo-500/15 text-indigo-300'
+                                                            : 'text-slate-300 hover:bg-white/5'
+                                                            ">
                                                         Todas las calidades
                                                     </div>
 
-                                                    <div
-                                                        v-for="q in arbitrageQualities"
-                                                        :key="q"
-                                                        @mousedown="
-                                                            selectQualityFilter(q)
+                                                    <div v-for="q in arbitrageQualities" :key="q" @mousedown="
+                                                        selectQualityFilter(q)
                                                         "
                                                         class="cursor-pointer px-3 py-2 text-xs capitalize transition-colors"
                                                         :class="[
                                                             QUALITY_COLORS[q] ??
-                                                                'text-slate-300',
+                                                            'text-slate-300',
                                                             arbitrageQualityFilter ===
                                                                 q
                                                                 ? 'bg-indigo-500/15'
                                                                 : 'hover:bg-white/5'
-                                                        ]"
-                                                    >
+                                                        ]">
                                                         {{ q }}
                                                     </div>
 
@@ -2563,59 +2299,43 @@ const QUALITY_COLORS = {
 
                                             <div class="relative">
 
-                                                <button
-                                                    type="button"
-                                                    @click="
-                                                        arbitrageBuyMenuOpen =
-                                                            !arbitrageBuyMenuOpen
-                                                    "
-                                                    @blur="
+                                                <button type="button" @click="
+                                                    arbitrageBuyMenuOpen =
+                                                    !arbitrageBuyMenuOpen
+                                                    " @blur="
                                                         closeBuyMenuOnBlur
                                                     "
                                                     class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300"
                                                     :class="{
                                                         'text-indigo-400':
                                                             arbitrageBuyRealmFilter
-                                                    }"
-                                                >
+                                                    }">
                                                     <Filter class="size-3" />
                                                 </button>
 
-                                                <div
-                                                    v-if="
-                                                        arbitrageBuyMenuOpen
-                                                    "
-                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]"
-                                                >
+                                                <div v-if="
+                                                    arbitrageBuyMenuOpen
+                                                "
+                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
 
-                                                    <div
-                                                        @mousedown="
-                                                            selectBuyRealmFilter('')
-                                                        "
-                                                        class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="
-                                                            !arbitrageBuyRealmFilter
-                                                                ? 'bg-indigo-500/15 text-indigo-300'
-                                                                : 'text-slate-300 hover:bg-white/5'
-                                                        "
-                                                    >
+                                                    <div @mousedown="
+                                                        selectBuyRealmFilter('')
+                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                        :class="!arbitrageBuyRealmFilter
+                                                            ? 'bg-indigo-500/15 text-indigo-300'
+                                                            : 'text-slate-300 hover:bg-white/5'
+                                                            ">
                                                         Todos los reinos
                                                     </div>
 
-                                                    <div
-                                                        v-for="slug in arbitrageBuyRealms"
-                                                        :key="slug"
-                                                        @mousedown="
-                                                            selectBuyRealmFilter(slug)
-                                                        "
-                                                        class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="
-                                                            arbitrageBuyRealmFilter ===
+                                                    <div v-for="slug in arbitrageBuyRealms" :key="slug" @mousedown="
+                                                        selectBuyRealmFilter(slug)
+                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                        :class="arbitrageBuyRealmFilter ===
                                                             slug
-                                                                ? 'bg-indigo-500/15 text-indigo-300'
-                                                                : 'text-slate-300 hover:bg-white/5'
-                                                        "
-                                                    >
+                                                            ? 'bg-indigo-500/15 text-indigo-300'
+                                                            : 'text-slate-300 hover:bg-white/5'
+                                                            ">
                                                         {{ realmName(slug) }}
                                                     </div>
 
@@ -2637,59 +2357,43 @@ const QUALITY_COLORS = {
 
                                             <div class="relative">
 
-                                                <button
-                                                    type="button"
-                                                    @click="
-                                                        arbitrageSellMenuOpen =
-                                                            !arbitrageSellMenuOpen
-                                                    "
-                                                    @blur="
+                                                <button type="button" @click="
+                                                    arbitrageSellMenuOpen =
+                                                    !arbitrageSellMenuOpen
+                                                    " @blur="
                                                         closeSellMenuOnBlur
                                                     "
                                                     class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300"
                                                     :class="{
                                                         'text-indigo-400':
                                                             arbitrageSellRealmFilter
-                                                    }"
-                                                >
+                                                    }">
                                                     <Filter class="size-3" />
                                                 </button>
 
-                                                <div
-                                                    v-if="
-                                                        arbitrageSellMenuOpen
-                                                    "
-                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]"
-                                                >
+                                                <div v-if="
+                                                    arbitrageSellMenuOpen
+                                                "
+                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
 
-                                                    <div
-                                                        @mousedown="
-                                                            selectSellRealmFilter('')
-                                                        "
-                                                        class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="
-                                                            !arbitrageSellRealmFilter
-                                                                ? 'bg-indigo-500/15 text-indigo-300'
-                                                                : 'text-slate-300 hover:bg-white/5'
-                                                        "
-                                                    >
+                                                    <div @mousedown="
+                                                        selectSellRealmFilter('')
+                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                        :class="!arbitrageSellRealmFilter
+                                                            ? 'bg-indigo-500/15 text-indigo-300'
+                                                            : 'text-slate-300 hover:bg-white/5'
+                                                            ">
                                                         Todos los reinos
                                                     </div>
 
-                                                    <div
-                                                        v-for="slug in arbitrageSellRealms"
-                                                        :key="slug"
-                                                        @mousedown="
-                                                            selectSellRealmFilter(slug)
-                                                        "
-                                                        class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="
-                                                            arbitrageSellRealmFilter ===
+                                                    <div v-for="slug in arbitrageSellRealms" :key="slug" @mousedown="
+                                                        selectSellRealmFilter(slug)
+                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
+                                                        :class="arbitrageSellRealmFilter ===
                                                             slug
-                                                                ? 'bg-indigo-500/15 text-indigo-300'
-                                                                : 'text-slate-300 hover:bg-white/5'
-                                                        "
-                                                    >
+                                                            ? 'bg-indigo-500/15 text-indigo-300'
+                                                            : 'text-slate-300 hover:bg-white/5'
+                                                            ">
                                                         {{ realmName(slug) }}
                                                     </div>
 
@@ -2714,40 +2418,28 @@ const QUALITY_COLORS = {
 
                             <tbody>
 
-                                <tr
-                                    v-for="o in filteredArbitrage"
-                                    :key="`${o.row.item_id}-${o.row.ilvl}`"
-                                    class="border-t border-white/5"
-                                >
+                                <tr v-for="o in filteredArbitrage" :key="`${o.row.item_id}-${o.row.ilvl}`"
+                                    class="border-t border-white/5">
 
                                     <td class="px-3 py-2">
 
-                                        <span
-                                            class="flex items-center gap-2"
-                                            :class="
-                                                QUALITY_COLORS[
-                                                    o.row.quality
-                                                ] ??
-                                                'text-slate-100'
-                                            "
-                                        >
+                                        <span class="flex items-center gap-2" :class="QUALITY_COLORS[
+                                            o.row.quality
+                                        ] ??
+                                            'text-slate-100'
+                                            ">
 
-                                            <img
-                                                v-if="o.row.icon_url"
-                                                :src="o.row.icon_url"
-                                                class="size-6 shrink-0 rounded"
-                                            />
+                                            <img v-if="o.row.icon_url" :src="o.row.icon_url"
+                                                class="size-6 shrink-0 rounded" />
 
-                                            <Sparkles
-                                                v-else
-                                                class="size-6 shrink-0"
-                                            />
+                                            <Sparkles v-else class="size-6 shrink-0" />
 
                                             <span class="truncate">
                                                 {{ o.row.name }}
                                             </span>
 
-                                            <span class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-semibold text-slate-100">
+                                            <span
+                                                class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-semibold text-slate-100">
                                                 ilvl {{ o.row.ilvl }}
                                             </span>
 
@@ -2821,13 +2513,8 @@ const QUALITY_COLORS = {
 
                                 </tr>
 
-                                <tr
-                                    v-if="!filteredArbitrage.length"
-                                >
-                                    <td
-                                        colspan="6"
-                                        class="px-3 py-4 text-center text-slate-500"
-                                    >
+                                <tr v-if="!filteredArbitrage.length">
+                                    <td colspan="6" class="px-3 py-4 text-center text-slate-500">
                                         Sin resultados
                                     </td>
                                 </tr>
