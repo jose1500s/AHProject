@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { Head } from '@inertiajs/vue3'
+import { Head, router } from '@inertiajs/vue3'
 import { Gavel, Boxes, Wallet, Hammer, ListChecks, Pickaxe } from '@lucide/vue'
 import Layout from './Layout.vue'
 import ItemCard from './Components/ItemCard.vue';
@@ -19,6 +19,14 @@ const props = defineProps({
     realms: Array,
     auctions: Object,
     lastSyncedAt: String,
+
+    filters: {
+        type: Object,
+        default: () => ({
+            category: 'all',
+            subcategory: 'all',
+        }),
+    },
 })
 
 const { realmSlug } = useRealmSelection(props.realms)
@@ -26,6 +34,39 @@ const { realmSlug } = useRealmSelection(props.realms)
 const VALID_TABS = ['auctions', 'commodities', 'mygold', 'bestcrafts', 'checklist', 'farmsessions']
 const activeTab = ref('auctions')
 const commoditiesSyncing = ref(false)
+
+function changeAuctionFilter({ category, subcategory }) {
+
+    const params = {}
+
+    if (realmSlug.value) {
+        params.realm = realmSlug.value
+    }
+
+    if (category && category !== 'all') {
+        params.category = category
+    }
+
+    if (
+        category &&
+        category !== 'all' &&
+        subcategory &&
+        subcategory !== 'all'
+    ) {
+        params.subcategory = subcategory
+    }
+
+    router.get(
+        window.location.pathname,
+        params,
+        {
+            only: ['auctions', 'filters'],
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+        }
+    )
+}
 
 const selectedItemId = ref(null)
 const selectedItemIlvl = ref(null)
@@ -143,7 +184,11 @@ watch(activeTab, (value) => {
             </div>
 
             <div v-show="activeTab === 'auctions'" class="flex flex-col items-center gap-5 w-full">
-                <CategoryFilter />
+                <CategoryFilter
+                    :category="filters?.category ?? 'all'"
+                    :subcategory="filters?.subcategory ?? 'all'"
+                    @change="changeAuctionFilter"
+                />
                 <div class="grid grid-cols-5 gap-2 w-full">
                     <ItemCard
                         v-for="listing in auctions.data"

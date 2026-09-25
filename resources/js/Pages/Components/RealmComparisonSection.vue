@@ -34,7 +34,6 @@ const STORAGE_KEY = 'compare_items'
 const FAVORITES_KEY = 'compare_favorites'
 const GROUPS_STORAGE_KEY = 'compare_item_groups'
 
-const ARBITRAGE_REALM_NAMES = ['Moon Guard', 'Illidan', 'Area 52', 'Sargeras']
 
 /*
 |--------------------------------------------------------------------------
@@ -51,6 +50,7 @@ const openCells = ref(new Set())
 const userTouchedRealms = ref(false)
 const favorites = ref(new Set())
 const tableSearch = ref('')
+const selectedRowKeys = ref(new Set())
 
 /*
 |--------------------------------------------------------------------------
@@ -69,22 +69,9 @@ const editingGroupName = ref('')
 
 /*
 |--------------------------------------------------------------------------
-| Arbitraje
+| Arbitraje entre reinos seleccionados
 |--------------------------------------------------------------------------
 */
-
-const arbitrageRows = ref([])
-const arbitrageLastSynced = ref({})
-const arbitrageLoading = ref(false)
-const arbitrageStarted = ref(false)
-const arbitrageSearch = ref('')
-
-const arbitrageBuyRealmFilter = ref('')
-const arbitrageSellRealmFilter = ref('')
-const arbitrageQualityFilter = ref('')
-const arbitrageBuyMenuOpen = ref(false)
-const arbitrageSellMenuOpen = ref(false)
-const arbitrageQualityMenuOpen = ref(false)
 
 const selectedRealmsArbitrageSearch = ref('')
 const selectedRealmsBuyFilter = ref('')
@@ -348,89 +335,45 @@ async function fetchComparison(force = false) {
 
 /*
 |--------------------------------------------------------------------------
-| Arbitrage
-|--------------------------------------------------------------------------
-*/
-
-const arbitrageRealmSlugs = computed(() =>
-    ARBITRAGE_REALM_NAMES
-        .map(
-            name =>
-                props.realms.find(
-                    r => r.name === name
-                )?.slug
-        )
-        .filter(Boolean)
-)
-
-async function fetchArbitrage(force = false) {
-    if (!selectedItems.value.length) return
-
-    arbitrageStarted.value = true
-    arbitrageLoading.value = true
-
-    try {
-        const params = new URLSearchParams()
-
-        params.append(
-            'items',
-            JSON.stringify(
-                selectedItems.value.map(i => ({
-                    item_id: i.id,
-                    ilvl: i.ilvl,
-                }))
-            )
-        )
-
-        arbitrageRealmSlugs.value.forEach(slug => {
-            params.append(
-                'realm_slugs[]',
-                slug
-            )
-        })
-
-        if (force) {
-            params.append('force', '1')
-        }
-
-        const res = await fetch(
-            `/api/realm-comparison?${params}`
-        )
-
-        const data = await res.json()
-
-        arbitrageRows.value = data.items
-        arbitrageLastSynced.value = data.last_synced
-    } finally {
-        arbitrageLoading.value = false
-    }
-}
-
-/*
-|--------------------------------------------------------------------------
 | Items
 |--------------------------------------------------------------------------
 */
 
-function removeItem(id, ilvl) {
-    selectedItems.value =
-        selectedItems.value.filter(
-            i =>
-                !(
-                    i.id === id &&
-                    i.ilvl === ilvl
-                )
-        )
+function rowSelectionKey(row) {
+    return `${row.item_id}-${row.ilvl ?? 'no-ilvl'}`
 }
 
-function removeItemsWithoutIlvl() {
-    selectedItems.value =
-        selectedItems.value.filter(
-            item =>
-                item.ilvl !== null &&
-                item.ilvl !== undefined &&
-                Number(item.ilvl) !== 1
-        )
+function isRowSelected(row) {
+    return selectedRowKeys.value.has(rowSelectionKey(row))
+}
+
+function toggleRowSelection(row) {
+    const next = new Set(selectedRowKeys.value)
+    const key = rowSelectionKey(row)
+
+    next.has(key)
+        ? next.delete(key)
+        : next.add(key)
+
+    selectedRowKeys.value = next
+}
+
+function removeSelectedItems() {
+    if (!selectedRowKeys.value.size) return
+
+    const keysToRemove = new Set(selectedRowKeys.value)
+
+    selectedItems.value = selectedItems.value.filter(item => {
+        const key = `${item.id}-${item.ilvl ?? 'no-ilvl'}`
+        return !keysToRemove.has(key)
+    })
+
+    groups.value = groups.value.map(group => ({
+        ...group,
+        items: group.items.filter(key => !keysToRemove.has(key)),
+    }))
+
+    selectedRowKeys.value = new Set()
 }
 
 function cellKey(row, slug) {
@@ -751,6 +694,12 @@ function copperToGsc(copper) {
     }
 }
 
+function formatGoldNumber(value) {
+    return new Intl.NumberFormat('en-US', {
+        maximumFractionDigits: 0,
+    }).format(Number(value ?? 0))
+}
+
 /*
 |--------------------------------------------------------------------------
 | Arbitrage calculations
@@ -764,13 +713,6 @@ function computeArbitrageFromRows(
     const opportunities = []
 
     for (const row of sourceRows) {
-        if (
-            row.ilvl === null ||
-            row.ilvl === undefined
-        ) {
-            continue
-        }
-
         const pricesBySlug =
             realmSlugs
                 .map(slug => {
@@ -848,157 +790,6 @@ function computeArbitrageFromRows(
     )
 }
 
-const arbitrageOpportunities =
-    computed(() =>
-        computeArbitrageFromRows(
-            arbitrageRows.value,
-            arbitrageRealmSlugs.value
-        )
-    )
-
-const arbitrageBuyRealms =
-    computed(() =>
-        [
-            ...new Set(
-                arbitrageOpportunities.value.map(
-                    o => o.buySlug
-                )
-            ),
-        ].sort()
-    )
-
-const arbitrageSellRealms =
-    computed(() =>
-        [
-            ...new Set(
-                arbitrageOpportunities.value.map(
-                    o => o.sellSlug
-                ),
-            ),
-        ].sort()
-    )
-
-const arbitrageQualities =
-    computed(() =>
-        [
-            ...new Set(
-                arbitrageOpportunities.value
-                    .map(
-                        o =>
-                            o.row
-                                .quality
-                    )
-                    .filter(Boolean)
-            ),
-        ]
-    )
-
-function selectBuyRealmFilter(slug) {
-    arbitrageBuyRealmFilter.value =
-        slug
-
-    arbitrageBuyMenuOpen.value =
-        false
-}
-
-function selectSellRealmFilter(slug) {
-    arbitrageSellRealmFilter.value =
-        slug
-
-    arbitrageSellMenuOpen.value =
-        false
-}
-
-function selectQualityFilter(quality) {
-    arbitrageQualityFilter.value =
-        quality
-
-    arbitrageQualityMenuOpen.value =
-        false
-}
-
-function closeBuyMenuOnBlur() {
-    setTimeout(() => {
-        arbitrageBuyMenuOpen.value =
-            false
-    }, 150)
-}
-
-function closeSellMenuOnBlur() {
-    setTimeout(() => {
-        arbitrageSellMenuOpen.value =
-            false
-    }, 150)
-}
-
-function closeQualityMenuOnBlur() {
-    setTimeout(() => {
-        arbitrageQualityMenuOpen.value =
-            false
-    }, 150)
-}
-
-const filteredArbitrage =
-    computed(() => {
-        let list =
-            arbitrageOpportunities.value
-
-        if (
-            arbitrageBuyRealmFilter.value
-        ) {
-            list = list.filter(
-                o =>
-                    o.buySlug ===
-                    arbitrageBuyRealmFilter.value
-            )
-        }
-
-        if (
-            arbitrageSellRealmFilter.value
-        ) {
-            list = list.filter(
-                o =>
-                    o.sellSlug ===
-                    arbitrageSellRealmFilter.value
-            )
-        }
-
-        if (
-            arbitrageQualityFilter.value
-        ) {
-            list = list.filter(
-                o =>
-                    o.row.quality ===
-                    arbitrageQualityFilter.value
-            )
-        }
-
-        const q =
-            normalizeText(
-                arbitrageSearch.value.trim()
-            )
-
-        if (q) {
-            list = list.filter(
-                o =>
-                    normalizeText(
-                        o.row.name
-                    ).includes(q)
-            )
-        }
-
-        return list
-    })
-
-const totalArbitrageProfit =
-    computed(() =>
-        arbitrageOpportunities.value.reduce(
-            (sum, o) =>
-                sum + o.netProfit,
-            0
-        )
-    )
-
 /*
 |--------------------------------------------------------------------------
 | Selected realms arbitrage
@@ -1012,7 +803,6 @@ const selectedRealmsArbitrageOpportunities =
             selectedRealms.value
         )
     )
-
 const selectedRealmsBuyOptions =
     computed(() =>
         [
@@ -1034,51 +824,51 @@ const selectedRealmsSellOptions =
             ),
         ].sort()
     )
+const selectedRealmsQualityOptions =
+    computed(() =>
+        [
+            ...new Set(
+                selectedRealmsArbitrageOpportunities.value
+                    .map(
+                        o =>
+                            o.row
+                                .quality
+                    )
+                    .filter(Boolean)
+            ),
+        ]
+    )
 
-const selectedRealmsIlvlOptions = computed(() =>
-    [
-        ...new Set(
-            selectedRealmsArbitrageOpportunities.value
-                .map(o => o.row.ilvl)
-                .filter(
-                    ilvl =>
-                        ilvl !== null &&
-                        ilvl !== undefined &&
-                        Number(ilvl) !== 1
-                )
-                .map(Number)
-        ),
-    ].sort((a, b) => a - b)
-)
+const selectedRealmsIlvlOptions = computed(() => {
+    const ilvls =
+        selectedRealmsArbitrageOpportunities.value
+            .map(o => o.row?.ilvl)
+            .filter(
+                ilvl =>
+                    ilvl !== null &&
+                    ilvl !== undefined &&
+                    ilvl !== '' &&
+                    Number(ilvl) !== 1 &&
+                    Number.isFinite(Number(ilvl))
+            )
+            .map(Number)
 
-function selectSelectedRealmsBuyFilter(
-    slug
-) {
-    selectedRealmsBuyFilter.value =
-        slug
+    return [...new Set(ilvls)].sort((a, b) => a - b)
+})
 
-    selectedRealmsBuyMenuOpen.value =
-        false
+function selectSelectedRealmsBuyFilter(slug) {
+    selectedRealmsBuyFilter.value = slug
+    selectedRealmsBuyMenuOpen.value = false
 }
 
-function selectSelectedRealmsSellFilter(
-    slug
-) {
-    selectedRealmsSellFilter.value =
-        slug
-
-    selectedRealmsSellMenuOpen.value =
-        false
+function selectSelectedRealmsSellFilter(slug) {
+    selectedRealmsSellFilter.value = slug
+    selectedRealmsSellMenuOpen.value = false
 }
 
-function selectSelectedRealmsQualityFilter(
-    quality
-) {
-    selectedRealmsQualityFilter.value =
-        quality
-
-    selectedRealmsQualityMenuOpen.value =
-        false
+function selectSelectedRealmsQualityFilter(quality) {
+    selectedRealmsQualityFilter.value = quality
+    selectedRealmsQualityMenuOpen.value = false
 }
 
 function selectSelectedRealmsIlvlFilter(ilvl) {
@@ -1088,22 +878,19 @@ function selectSelectedRealmsIlvlFilter(ilvl) {
 
 function closeSelectedRealmsBuyMenuOnBlur() {
     setTimeout(() => {
-        selectedRealmsBuyMenuOpen.value =
-            false
+        selectedRealmsBuyMenuOpen.value = false
     }, 150)
 }
 
 function closeSelectedRealmsSellMenuOnBlur() {
     setTimeout(() => {
-        selectedRealmsSellMenuOpen.value =
-            false
+        selectedRealmsSellMenuOpen.value = false
     }, 150)
 }
 
 function closeSelectedRealmsQualityMenuOnBlur() {
     setTimeout(() => {
-        selectedRealmsQualityMenuOpen.value =
-            false
+        selectedRealmsQualityMenuOpen.value = false
     }, 150)
 }
 
@@ -1118,9 +905,7 @@ const filteredSelectedRealmsArbitrage =
         let list =
             selectedRealmsArbitrageOpportunities.value
 
-        if (
-            selectedRealmsBuyFilter.value
-        ) {
+        if (selectedRealmsBuyFilter.value) {
             list = list.filter(
                 o =>
                     o.buySlug ===
@@ -1128,9 +913,7 @@ const filteredSelectedRealmsArbitrage =
             )
         }
 
-        if (
-            selectedRealmsSellFilter.value
-        ) {
+        if (selectedRealmsSellFilter.value) {
             list = list.filter(
                 o =>
                     o.sellSlug ===
@@ -1138,19 +921,32 @@ const filteredSelectedRealmsArbitrage =
             )
         }
 
-        if (
-            selectedRealmsQualityFilter.value
-        ) {
+        if (selectedRealmsQualityFilter.value) {
             list = list.filter(
                 o =>
-                    o.row.quality ===
+                    o.row?.quality ===
                     selectedRealmsQualityFilter.value
             )
         }
-        if (selectedRealmsIlvlFilter.value) {
+
+        // FILTRO POR ILVL
+        if (selectedRealmsIlvlFilter.value === 'no-ilvl') {
+            // Mostrar únicamente items SIN ilvl
+            list = list.filter(o => {
+                const ilvl = o.row?.ilvl
+
+                return (
+                    ilvl === null ||
+                    ilvl === undefined ||
+                    ilvl === '' ||
+                    Number(ilvl) === 1
+                )
+            })
+        } else if (selectedRealmsIlvlFilter.value !== '') {
+            // Mostrar únicamente el ilvl seleccionado
             list = list.filter(
                 o =>
-                    Number(o.row.ilvl) ===
+                    Number(o.row?.ilvl) ===
                     Number(selectedRealmsIlvlFilter.value)
             )
         }
@@ -1164,7 +960,7 @@ const filteredSelectedRealmsArbitrage =
             list = list.filter(
                 o =>
                     normalizeText(
-                        o.row.name
+                        o.row?.name
                     ).includes(q)
             )
         }
@@ -1415,12 +1211,20 @@ const QUALITY_COLORS = {
                     </div>
                 </div>
             </div>
-            <!-- REMOVE ITEMS WITHOUT ILVL -->
-            <button type="button" @click="removeItemsWithoutIlvl"
-                class="flex items-center gap-2 rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-1.5 text-sm font-medium text-red-300 transition hover:border-red-400/40 hover:bg-red-500/10 hover:text-red-200"
-                title="Eliminar todos los items sin ilvl">
-                <Trash2 class="size-3.5" />
-                Eliminar items sin ilvl
+            <!-- DELETE SELECTED ITEMS -->
+            <button
+                type="button"
+                @click="removeSelectedItems"
+                :disabled="selectedRowKeys.size === 0"
+                class="flex size-8 items-center justify-center rounded-lg border transition"
+                :class="selectedRowKeys.size
+                    ? 'border-red-400/30 bg-red-500/10 text-red-300 hover:border-red-400/60 hover:bg-red-500/20 hover:text-red-200'
+                    : 'cursor-not-allowed border-white/5 bg-white/[0.02] text-slate-700'"
+                :title="selectedRowKeys.size
+                    ? `Eliminar ${selectedRowKeys.size} item${selectedRowKeys.size === 1 ? '' : 's'} seleccionado${selectedRowKeys.size === 1 ? '' : 's'}`
+                    : 'Selecciona uno o más items para eliminarlos'"
+            >
+                <Trash2 class="size-4" />
             </button>
         </div>
 
@@ -1509,20 +1313,37 @@ const QUALITY_COLORS = {
                         <!-- ROWS -->
                         <template v-else>
 
-                            <tr v-for="row in filteredRows" :key="`${row.item_id}-${row.ilvl}`"
-                                class="border-t border-white/5 align-top" :class="favorites.has(
-                                    favoriteKey(row)
-                                )
-                                    ? 'bg-amber-400/4'
-                                    : ''
-                                    ">
+                            <tr
+                                v-for="row in filteredRows"
+                                :key="`${row.item_id}-${row.ilvl}`"
+                                class="border-t border-white/5 align-top transition-colors"
+                                :class="isRowSelected(row)
+                                    ? 'bg-indigo-500/10'
+                                    : favorites.has(favoriteKey(row))
+                                        ? 'bg-amber-400/4'
+                                        : ''
+                                "
+                            >
 
                                 <!-- ITEM -->
-                                <td class="px-4 py-2.5 cursor-pointer hover:bg-white/3" @click="openItemDetail(row)">
+                                <td class="px-4 py-2.5">
 
                                     <span class="flex items-center gap-2" :class="QUALITY_COLORS[row.quality]
                                         ?? 'text-slate-100'
                                         ">
+
+                                        <!-- SELECT -->
+                                        <button
+                                            type="button"
+                                            @click.stop="toggleRowSelection(row)"
+                                            class="flex size-4 shrink-0 items-center justify-center rounded border transition"
+                                            :class="isRowSelected(row)
+                                                ? 'border-indigo-400 bg-indigo-500/30 text-indigo-200'
+                                                : 'border-white/15 text-transparent hover:border-indigo-400/60'"
+                                            :title="isRowSelected(row) ? 'Deseleccionar item' : 'Seleccionar item'"
+                                        >
+                                            <Check v-if="isRowSelected(row)" class="size-3" />
+                                        </button>
 
                                         <!-- FAVORITE -->
                                         <button type="button" @click.stop="toggleFavorite(row)" class="shrink-0">
@@ -1534,25 +1355,30 @@ const QUALITY_COLORS = {
                                                 " />
                                         </button>
 
-                                        <!-- ICON -->
-                                        <img v-if="row.icon_url" :src="row.icon_url" class="size-5 rounded shrink-0" />
+                                        <!-- ITEM DETAIL -->
+                                        <button
+                                            type="button"
+                                            @click.stop="openItemDetail(row)"
+                                            class="flex min-w-0 items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-white/5"
+                                            title="Abrir detalle del item"
+                                        >
+                                            <img v-if="row.icon_url" :src="row.icon_url" class="size-5 rounded shrink-0" />
 
-                                        <Sparkles v-else class="size-5 shrink-0" />
+                                            <Sparkles v-else class="size-5 shrink-0" />
 
-                                        <!-- NAME -->
-                                        <span class="truncate">
-                                            {{ row.name }}
-                                        </span>
+                                            <span class="truncate">
+                                                {{ row.name }}
+                                            </span>
 
-                                        <!-- ILVL -->
-                                        <span
-                                            class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100">
-                                            {{
-                                                row.ilvl !== null
-                                                    ? `ilvl ${row.ilvl}`
-                                                    : 'Sin ilvl'
-                                            }}
-                                        </span>
+                                            <span
+                                                class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[12px] font-semibold text-slate-100">
+                                                {{
+                                                    row.ilvl !== null
+                                                        ? `ilvl ${row.ilvl}`
+                                                        : 'Sin ilvl'
+                                                }}
+                                            </span>
+                                        </button>
 
                                         <!-- GROUP BUTTON -->
                                         <div class="item-group-menu-container relative shrink-0">
@@ -1628,12 +1454,6 @@ const QUALITY_COLORS = {
                                             </div>
 
                                         </div>
-
-                                        <!-- REMOVE -->
-                                        <button type="button" @click.stop="removeItem(row.item_id, row.ilvl)"
-                                            class="shrink-0 text-slate-500 hover:text-red-400">
-                                            <X class="size-3.5" />
-                                        </button>
 
                                     </span>
 
@@ -1781,18 +1601,22 @@ price,
                             <span class="inline-flex items-center gap-0.5">
                                 <span class="size-1.5 rounded-full bg-amber-400"></span>
                                 {{
-                                    copperToGsc(
-                                        totalSelectedRealmsArbitrageProfit
-                                    ).gold
+                                    formatGoldNumber(
+                                        copperToGsc(
+                                            totalSelectedRealmsArbitrageProfit
+                                        ).gold
+                                    )
                                 }}
                             </span>
 
                             <span class="inline-flex items-center gap-0.5">
                                 <span class="size-1.5 rounded-full bg-slate-300"></span>
                                 {{
-                                    copperToGsc(
-                                        totalSelectedRealmsArbitrageProfit
-                                    ).silver
+                                    formatGoldNumber(
+                                        copperToGsc(
+                                            totalSelectedRealmsArbitrageProfit
+                                        ).silver
+                                    )
                                 }}
                             </span>
 
@@ -1875,6 +1699,58 @@ price,
 
                                         </div>
 
+                                        <!-- ILVL FILTER -->
+                                        <div class="relative">
+
+                                            <button type="button" @click.stop="
+                                                selectedRealmsIlvlMenuOpen =
+                                                !selectedRealmsIlvlMenuOpen
+                                                " class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300" :class="{
+                                                    'text-indigo-400':
+                                                        selectedRealmsIlvlFilter !== ''
+                                                }" title="Filtrar por nivel de objeto">
+                                                <Filter class="size-3" />
+                                            </button>
+
+                                            <div v-if="selectedRealmsIlvlMenuOpen"
+                                                class="absolute left-0 z-20 mt-1 max-h-64 w-32 overflow-y-auto rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]"
+                                                @mousedown.stop>
+
+                                                <!-- TODOS -->
+                                                <div @mousedown.prevent="
+                                                    selectSelectedRealmsIlvlFilter('')
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors" :class="selectedRealmsIlvlFilter === ''
+                                                        ? 'bg-indigo-500/15 text-indigo-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                    ">
+                                                    Todos
+                                                </div>
+
+                                                <!-- SIN ILVL -->
+                                                <div @mousedown.prevent="
+                                                    selectSelectedRealmsIlvlFilter('no-ilvl')
+                                                    " class="cursor-pointer px-3 py-2 text-xs transition-colors" :class="selectedRealmsIlvlFilter === 'no-ilvl'
+                                                        ? 'bg-indigo-500/15 text-indigo-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                    ">
+                                                    Sin ilvl
+                                                </div>
+
+                                                <!-- ILVLS -->
+                                                <div v-for="ilvl in selectedRealmsIlvlOptions" :key="ilvl"
+                                                    @mousedown.prevent="
+                                                        selectSelectedRealmsIlvlFilter(ilvl)
+                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors" :class="Number(selectedRealmsIlvlFilter) === Number(ilvl) &&
+                                                        selectedRealmsIlvlFilter !== 'no-ilvl'
+                                                        ? 'bg-indigo-500/15 text-indigo-300'
+                                                        : 'text-slate-300 hover:bg-white/5'
+                                                    ">
+                                                    {{ ilvl }}
+                                                </div>
+
+                                            </div>
+
+                                        </div>
                                     </div>
                                 </th>
 
@@ -2023,8 +1899,11 @@ price,
                                         </span>
 
                                         <span
-                                            class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-semibold text-slate-100">
-                                            ilvl {{ o.row.ilvl }}
+                                            class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">
+                                            {{ o.row.ilvl && Number(o.row.ilvl) !== 1
+                                                ? `ilvl ${o.row.ilvl}`
+                                                : 'Sin ilvl'
+                                            }}
                                         </span>
 
                                     </span>
@@ -2083,12 +1962,20 @@ price,
 
                                         <span class="inline-flex items-center gap-0.5">
                                             <span class="size-1.5 rounded-full bg-amber-400"></span>
-                                            {{ copperToGsc(o.netProfit).gold }}
+                                            {{
+                                                formatGoldNumber(
+                                                    copperToGsc(o.netProfit).gold
+                                                )
+                                            }}
                                         </span>
 
                                         <span class="inline-flex items-center gap-0.5">
                                             <span class="size-1.5 rounded-full bg-slate-300"></span>
-                                            {{ copperToGsc(o.netProfit).silver }}
+                                            {{
+                                                formatGoldNumber(
+                                                    copperToGsc(o.netProfit).silver
+                                                )
+                                            }}
                                         </span>
 
                                     </span>
@@ -2121,421 +2008,6 @@ price,
 
         </div>
 
-        <!-- FIXED ARBITRAGE -->
-        <div v-if="selectedItems.length" class="mt-5 border-t border-white/10 pt-5">
-
-            <div class="mb-3 flex items-center justify-between">
-
-                <div>
-
-                    <h3 class="flex items-center gap-2 text-sm font-bold text-slate-100">
-                        <ArrowLeftRight class="size-4 text-indigo-400" />
-                        Oportunidades de arbitraje
-                    </h3>
-
-                    <p class="mt-0.5 text-xs text-slate-500">
-                        Compara los
-                        {{ selectedItems.length }}
-                        ítems de tu lista contra
-                        {{ ARBITRAGE_REALM_NAMES.length }}
-                        reinos fijos
-                        ({{ ARBITRAGE_REALM_NAMES.join(', ') }}).
-                        Esta comparación no toma en cuenta objetos sin ilvl.
-                    </p>
-
-                </div>
-
-                <button v-if="arbitrageStarted" type="button" @click="fetchArbitrage(true)" :disabled="arbitrageLoading"
-                    class="flex shrink-0 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:border-indigo-400/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-50">
-
-                    <RefreshCw class="size-3.5" :class="{
-                        'animate-spin':
-                            arbitrageLoading
-                    }" />
-
-                    Actualizar
-
-                </button>
-
-            </div>
-
-            <button v-if="!arbitrageStarted" type="button" @click="fetchArbitrage(false)"
-                class="flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300 transition-colors hover:border-indigo-400/70 hover:bg-indigo-500/20">
-
-                <RefreshCw class="size-4" />
-
-                Comparar oportunidades
-
-            </button>
-
-            <div v-else-if="arbitrageLoading" class="py-8 text-center text-sm text-slate-500">
-                Comparando
-                {{ selectedItems.length }}
-                ítems entre
-                {{ ARBITRAGE_REALM_NAMES.length }}
-                reinos...
-            </div>
-
-            <template v-else>
-
-                <div v-if="!arbitrageOpportunities.length"
-                    class="rounded-lg border border-white/5 bg-white/3 py-8 text-center text-sm text-slate-500">
-                    No se encontraron oportunidades de arbitraje rentables con los datos actuales.
-                </div>
-
-                <div v-else class="rounded-xl border border-indigo-400/20 bg-indigo-500/5 p-4">
-
-                    <div class="mb-3 flex items-center justify-between">
-
-                        <h4 class="text-sm font-bold text-slate-100">
-                            Compra barato. Vende mejor.
-                        </h4>
-
-                        <div class="text-right">
-
-                            <div class="text-[10px] uppercase tracking-wide text-slate-500">
-                                Beneficio total estimado
-                            </div>
-
-                            <div class="flex items-center justify-end gap-1 text-sm font-bold text-emerald-400">
-
-                                <span class="inline-flex items-center gap-0.5">
-                                    <span class="size-1.5 rounded-full bg-amber-400"></span>
-                                    {{ copperToGsc(totalArbitrageProfit).gold }}
-                                </span>
-
-                                <span class="inline-flex items-center gap-0.5">
-                                    <span class="size-1.5 rounded-full bg-slate-300"></span>
-                                    {{ copperToGsc(totalArbitrageProfit).silver }}
-                                </span>
-
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                    <div class="relative mb-3 w-full max-w-sm">
-
-                        <Search
-                            class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-500" />
-
-                        <input v-model="arbitrageSearch" type="text" placeholder="Filtrar oportunidades..."
-                            class="w-full rounded-lg border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-indigo-400/60" />
-
-                    </div>
-
-                    <div class="app-scroll max-h-96 overflow-y-auto rounded-lg border border-white/10">
-
-                        <table class="w-full text-sm">
-
-                            <thead
-                                class="sticky top-0 z-10 bg-[#181b3a] text-[11px] uppercase tracking-wider text-slate-500">
-
-                                <tr>
-
-                                    <th class="px-3 py-2 text-left">
-                                        <div class="flex items-center gap-1.5">
-
-                                            Item
-
-                                            <div class="relative">
-
-                                                <button type="button" @click="
-                                                    arbitrageQualityMenuOpen =
-                                                    !arbitrageQualityMenuOpen
-                                                    " @blur="
-                                                        closeQualityMenuOnBlur
-                                                    "
-                                                    class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300"
-                                                    :class="{
-                                                        'text-indigo-400':
-                                                            arbitrageQualityFilter
-                                                    }">
-                                                    <Filter class="size-3" />
-                                                </button>
-
-                                                <div v-if="
-                                                    arbitrageQualityMenuOpen
-                                                "
-                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
-
-                                                    <div @mousedown="
-                                                        selectQualityFilter('')
-                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="!arbitrageQualityFilter
-                                                            ? 'bg-indigo-500/15 text-indigo-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                            ">
-                                                        Todas las calidades
-                                                    </div>
-
-                                                    <div v-for="q in arbitrageQualities" :key="q" @mousedown="
-                                                        selectQualityFilter(q)
-                                                        "
-                                                        class="cursor-pointer px-3 py-2 text-xs capitalize transition-colors"
-                                                        :class="[
-                                                            QUALITY_COLORS[q] ??
-                                                            'text-slate-300',
-                                                            arbitrageQualityFilter ===
-                                                                q
-                                                                ? 'bg-indigo-500/15'
-                                                                : 'hover:bg-white/5'
-                                                        ]">
-                                                        {{ q }}
-                                                    </div>
-
-                                                </div>
-
-                                            </div>
-
-                                        </div>
-                                    </th>
-
-                                    <th class="px-3 py-2 text-left">
-                                        <div class="flex items-center gap-1.5">
-
-                                            Comprar en
-
-                                            <div class="relative">
-
-                                                <button type="button" @click="
-                                                    arbitrageBuyMenuOpen =
-                                                    !arbitrageBuyMenuOpen
-                                                    " @blur="
-                                                        closeBuyMenuOnBlur
-                                                    "
-                                                    class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300"
-                                                    :class="{
-                                                        'text-indigo-400':
-                                                            arbitrageBuyRealmFilter
-                                                    }">
-                                                    <Filter class="size-3" />
-                                                </button>
-
-                                                <div v-if="
-                                                    arbitrageBuyMenuOpen
-                                                "
-                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
-
-                                                    <div @mousedown="
-                                                        selectBuyRealmFilter('')
-                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="!arbitrageBuyRealmFilter
-                                                            ? 'bg-indigo-500/15 text-indigo-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                            ">
-                                                        Todos los reinos
-                                                    </div>
-
-                                                    <div v-for="slug in arbitrageBuyRealms" :key="slug" @mousedown="
-                                                        selectBuyRealmFilter(slug)
-                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="arbitrageBuyRealmFilter ===
-                                                            slug
-                                                            ? 'bg-indigo-500/15 text-indigo-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                            ">
-                                                        {{ realmName(slug) }}
-                                                    </div>
-
-                                                </div>
-
-                                            </div>
-
-                                        </div>
-                                    </th>
-
-                                    <th class="px-3 py-2 text-left">
-                                        Precio
-                                    </th>
-
-                                    <th class="px-3 py-2 text-left">
-                                        <div class="flex items-center gap-1.5">
-
-                                            Vender en
-
-                                            <div class="relative">
-
-                                                <button type="button" @click="
-                                                    arbitrageSellMenuOpen =
-                                                    !arbitrageSellMenuOpen
-                                                    " @blur="
-                                                        closeSellMenuOnBlur
-                                                    "
-                                                    class="rounded p-0.5 text-slate-500 transition hover:bg-white/10 hover:text-indigo-300"
-                                                    :class="{
-                                                        'text-indigo-400':
-                                                            arbitrageSellRealmFilter
-                                                    }">
-                                                    <Filter class="size-3" />
-                                                </button>
-
-                                                <div v-if="
-                                                    arbitrageSellMenuOpen
-                                                "
-                                                    class="absolute left-0 z-20 mt-1 w-40 overflow-hidden rounded-lg border border-indigo-400/20 bg-[#12142b]/95 normal-case backdrop-blur-sm shadow-[0_0_20px_2px_rgba(99,102,241,0.15)]">
-
-                                                    <div @mousedown="
-                                                        selectSellRealmFilter('')
-                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="!arbitrageSellRealmFilter
-                                                            ? 'bg-indigo-500/15 text-indigo-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                            ">
-                                                        Todos los reinos
-                                                    </div>
-
-                                                    <div v-for="slug in arbitrageSellRealms" :key="slug" @mousedown="
-                                                        selectSellRealmFilter(slug)
-                                                        " class="cursor-pointer px-3 py-2 text-xs transition-colors"
-                                                        :class="arbitrageSellRealmFilter ===
-                                                            slug
-                                                            ? 'bg-indigo-500/15 text-indigo-300'
-                                                            : 'text-slate-300 hover:bg-white/5'
-                                                            ">
-                                                        {{ realmName(slug) }}
-                                                    </div>
-
-                                                </div>
-
-                                            </div>
-
-                                        </div>
-                                    </th>
-
-                                    <th class="px-3 py-2 text-left">
-                                        Precio
-                                    </th>
-
-                                    <th class="px-3 py-2 text-right">
-                                        Beneficio
-                                    </th>
-
-                                </tr>
-
-                            </thead>
-
-                            <tbody>
-
-                                <tr v-for="o in filteredArbitrage" :key="`${o.row.item_id}-${o.row.ilvl}`"
-                                    class="border-t border-white/5">
-
-                                    <td class="px-3 py-2">
-
-                                        <span class="flex items-center gap-2" :class="QUALITY_COLORS[
-                                            o.row.quality
-                                        ] ??
-                                            'text-slate-100'
-                                            ">
-
-                                            <img v-if="o.row.icon_url" :src="o.row.icon_url"
-                                                class="size-6 shrink-0 rounded" />
-
-                                            <Sparkles v-else class="size-6 shrink-0" />
-
-                                            <span class="truncate">
-                                                {{ o.row.name }}
-                                            </span>
-
-                                            <span
-                                                class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[11px] font-semibold text-slate-100">
-                                                ilvl {{ o.row.ilvl }}
-                                            </span>
-
-                                        </span>
-
-                                    </td>
-
-                                    <td class="px-3 py-2 text-amber-300">
-                                        {{ realmName(o.buySlug) }}
-                                    </td>
-
-                                    <td class="px-3 py-2">
-
-                                        <span class="inline-flex items-center gap-1">
-
-                                            <span class="inline-flex items-center gap-0.5 text-amber-400">
-                                                <span class="size-1.5 rounded-full bg-amber-400"></span>
-                                                {{ copperToGsc(o.buyCopper).gold }}
-                                            </span>
-
-                                            <span class="inline-flex items-center gap-0.5 text-slate-300">
-                                                <span class="size-1.5 rounded-full bg-slate-300"></span>
-                                                {{ copperToGsc(o.buyCopper).silver }}
-                                            </span>
-
-                                        </span>
-
-                                    </td>
-
-                                    <td class="px-3 py-2 text-emerald-300">
-                                        {{ realmName(o.sellSlug) }}
-                                    </td>
-
-                                    <td class="px-3 py-2">
-
-                                        <span class="inline-flex items-center gap-1">
-
-                                            <span class="inline-flex items-center gap-0.5 text-amber-400">
-                                                <span class="size-1.5 rounded-full bg-amber-400"></span>
-                                                {{ copperToGsc(o.sellCopper).gold }}
-                                            </span>
-
-                                            <span class="inline-flex items-center gap-0.5 text-slate-300">
-                                                <span class="size-1.5 rounded-full bg-slate-300"></span>
-                                                {{ copperToGsc(o.sellCopper).silver }}
-                                            </span>
-
-                                        </span>
-
-                                    </td>
-
-                                    <td class="px-3 py-2 text-right">
-
-                                        <span class="inline-flex items-center gap-1 font-semibold text-emerald-400">
-
-                                            +
-
-                                            <span class="inline-flex items-center gap-0.5">
-                                                <span class="size-1.5 rounded-full bg-amber-400"></span>
-                                                {{ copperToGsc(o.netProfit).gold }}
-                                            </span>
-
-                                            <span class="inline-flex items-center gap-0.5">
-                                                <span class="size-1.5 rounded-full bg-slate-300"></span>
-                                                {{ copperToGsc(o.netProfit).silver }}
-                                            </span>
-
-                                        </span>
-
-                                    </td>
-
-                                </tr>
-
-                                <tr v-if="!filteredArbitrage.length">
-                                    <td colspan="6" class="px-3 py-4 text-center text-slate-500">
-                                        Sin resultados
-                                    </td>
-                                </tr>
-
-                            </tbody>
-
-                        </table>
-
-                    </div>
-
-                    <p class="mt-3 text-xs text-slate-500">
-                        Beneficios ya con comisión del AH (5%) restada.
-                        Comparativa actualizada
-                        {{ timeAgo(Object.values(arbitrageLastSynced)[0]) }}.
-                    </p>
-
-                </div>
-
-            </template>
-
-        </div>
 
     </section>
 </template>

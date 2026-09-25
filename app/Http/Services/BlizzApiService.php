@@ -116,16 +116,16 @@ class BlizzApiService
 
         $responses = Http::pool(
             fn($pool) =>
-            collect($itemIds)->map(
-                fn($id) =>
-                $pool->as($id)
-                    ->withToken($token)
-                    ->timeout(15)
-                    ->get("https://{$this->region}.api.blizzard.com/data/wow/item/{$id}", [
-                        'namespace' => "static-{$this->region}",
-                        'locale' => 'es_MX',
-                    ])
-            )->all()
+                collect($itemIds)->map(
+                    fn($id) =>
+                        $pool->as($id)
+                            ->withToken($token)
+                            ->timeout(15)
+                            ->get("https://{$this->region}.api.blizzard.com/data/wow/item/{$id}", [
+                                'namespace' => "static-{$this->region}",
+                                'locale' => 'es_MX',
+                            ])
+                )->all()
         );
 
         return collect($responses)
@@ -149,16 +149,16 @@ class BlizzApiService
 
         $responses = Http::pool(
             fn($pool) =>
-            collect($itemIds)->map(
-                fn($id) =>
-                $pool->as($id)
-                    ->withToken($token)
-                    ->timeout(15)
-                    ->get("https://{$this->region}.api.blizzard.com/data/wow/media/item/{$id}", [
-                        'namespace' => "static-{$this->region}",
-                        'locale' => 'es_MX',
-                    ])
-            )->all()
+                collect($itemIds)->map(
+                    fn($id) =>
+                        $pool->as($id)
+                            ->withToken($token)
+                            ->timeout(15)
+                            ->get("https://{$this->region}.api.blizzard.com/data/wow/media/item/{$id}", [
+                                'namespace' => "static-{$this->region}",
+                                'locale' => 'es_MX',
+                            ])
+                )->all()
         );
 
         return collect($responses)
@@ -546,26 +546,412 @@ class BlizzApiService
         ];
     }
 
-    public function getAuctionListings(int $connectedRealmId, ?string $search = null, int $perPage = 24)
-    {
-        return DB::table('auctions')
-            ->join('items', 'items.blizzard_id', '=', 'auctions.item_id')
+    public function getAuctionListings(
+        int $connectedRealmId,
+        ?string $search = null,
+        int $perPage = 24,
+        string $category = 'all',
+        string $subcategory = 'all'
+    ) {
+        $query = DB::table('auctions')
+            ->join(
+                'items',
+                'items.blizzard_id',
+                '=',
+                'auctions.item_id'
+            )
             ->select(
                 'items.blizzard_id as item_id',
                 'items.name',
                 'items.quality',
                 'items.item_class',
                 'items.item_subclass',
+                'items.inventory_type',
                 'items.icon_url',
-                DB::raw('MIN(COALESCE(auctions.buyout, auctions.unit_price)) as min_price_copper'),
+
+                DB::raw(
+                    'MIN(COALESCE(auctions.buyout, auctions.unit_price)) as min_price_copper'
+                ),
+
                 DB::raw('COUNT(*) as listings'),
+
                 DB::raw('SUM(auctions.quantity) as volume')
             )
-            ->where('auctions.connected_realm_id', $connectedRealmId)
-            ->when($search, fn($q) => $q->where('items.name', 'ilike', "%{$search}%"))
-            ->groupBy('items.blizzard_id', 'items.name', 'items.quality', 'items.item_class', 'items.item_subclass', 'items.icon_url')
+            ->where(
+                'auctions.connected_realm_id',
+                $connectedRealmId
+            )
+
+            /*
+             * BUSCADOR
+             */
+            ->when(
+                $search,
+                fn($q) =>
+                    $q->where(
+                        'items.name',
+                        'ilike',
+                        "%{$search}%"
+                    )
+            );
+
+        /*
+        |--------------------------------------------------------------------------
+        | CATEGORY FILTERS
+        |--------------------------------------------------------------------------
+        */
+
+        switch ($category) {
+
+            /*
+             * ARMOR
+             */
+            case 'armor':
+
+                $query->where(
+                    'items.item_class',
+                    'Armadura'
+                );
+
+                switch ($subcategory) {
+
+                    case 'head':
+                        $query->where(
+                            'items.inventory_type',
+                            'Cabeza'
+                        );
+                        break;
+
+                    case 'shoulders':
+                        $query->where(
+                            'items.inventory_type',
+                            'Hombro'
+                        );
+                        break;
+
+                    case 'chest':
+                        $query->where(
+                            'items.inventory_type',
+                            'Pecho'
+                        );
+                        break;
+
+                    case 'hands':
+                        $query->where(
+                            'items.inventory_type',
+                            'Manos'
+                        );
+                        break;
+
+                    case 'legs':
+                        $query->where(
+                            'items.inventory_type',
+                            'Piernas'
+                        );
+                        break;
+
+                    case 'feet':
+                        $query->where(
+                            'items.inventory_type',
+                            'Pies'
+                        );
+                        break;
+                }
+
+                break;
+
+            /*
+             * WEAPONS
+             */
+            case 'weapons':
+
+                /*
+                 * Off-hand es especial porque los objetos de
+                 * mano izquierda aparecen bajo Armadura.
+                 */
+                if ($subcategory === 'off-hand') {
+
+                    $query
+                        ->where(
+                            'items.item_class',
+                            'Armadura'
+                        )
+                        ->where(
+                            'items.inventory_type',
+                            'Mano izquierda'
+                        );
+
+                    break;
+                }
+
+                $query->where(
+                    'items.item_class',
+                    'Arma'
+                );
+
+                switch ($subcategory) {
+
+                    case 'one-hand':
+
+                        $query->whereIn(
+                            'items.inventory_type',
+                            [
+                                'Una mano',
+                                'Mano derecha',
+                            ]
+                        );
+
+                        break;
+
+                    case 'two-hand':
+
+                        $query->where(
+                            'items.inventory_type',
+                            'Dos manos'
+                        );
+
+                        break;
+
+                    case 'ranged':
+
+                        $query->whereIn(
+                            'items.inventory_type',
+                            [
+                                'A distancia',
+                                'Arrojadiza',
+                            ]
+                        );
+
+                        break;
+                }
+
+                break;
+
+            /*
+             * CONSUMABLES
+             */
+            case 'consumables':
+
+                $query->where(
+                    'items.item_class',
+                    'Consumible'
+                );
+
+                switch ($subcategory) {
+
+                    case 'potions':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Pociones'
+                        );
+
+                        break;
+
+                    case 'elixirs':
+
+                        /*
+                         * Incluimos Elixires y también
+                         * Frascos / Ampollas.
+                         */
+                        $query->whereIn(
+                            'items.item_subclass',
+                            [
+                                'Elixires',
+                                'Frascos y ampollas',
+                            ]
+                        );
+
+                        break;
+
+                    case 'food-drink':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Comida y bebida'
+                        );
+
+                        break;
+                }
+
+                break;
+
+            /*
+             * REAGENTS
+             */
+            case 'reagents':
+
+                $query->where(
+                    'items.item_class',
+                    'Habilidad comercial'
+                );
+
+                switch ($subcategory) {
+
+                    case 'herbs':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Hierba'
+                        );
+
+                        break;
+
+                    case 'ores':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Metal y piedra'
+                        );
+
+                        break;
+
+                    case 'cloth':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Tela'
+                        );
+
+                        break;
+
+                    case 'leather':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Cuero'
+                        );
+
+                        break;
+                }
+
+                break;
+
+            /*
+             * RECIPES
+             */
+            case 'recipes':
+
+                $query->where(
+                    'items.item_class',
+                    'Receta'
+                );
+
+                switch ($subcategory) {
+
+                    case 'alchemy':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Alquimia'
+                        );
+
+                        break;
+
+                    case 'inscription':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Inscripción'
+                        );
+
+                        break;
+
+                    case 'jewelcrafting':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Joyería'
+                        );
+
+                        break;
+                }
+
+                break;
+
+            /*
+             * MISCELLANEOUS
+             */
+            case 'miscellaneous':
+
+                /*
+                 * Pets están guardadas en dos posibles clases.
+                 */
+                if ($subcategory === 'pets') {
+
+                    $query->where(function ($q) {
+
+                        $q
+                            ->where(function ($q) {
+                                $q
+                                    ->where(
+                                        'items.item_class',
+                                        'Miscelánea'
+                                    )
+                                    ->where(
+                                        'items.item_subclass',
+                                        'Mascotas de compañía'
+                                    );
+                            })
+
+                            ->orWhere(
+                                'items.item_class',
+                                'Mascotas de duelo'
+                            );
+                    });
+
+                    break;
+                }
+
+                $query->where(
+                    'items.item_class',
+                    'Miscelánea'
+                );
+
+                switch ($subcategory) {
+
+                    case 'mounts':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Montura'
+                        );
+
+                        break;
+
+                    case 'other':
+
+                        $query->where(
+                            'items.item_subclass',
+                            'Otros'
+                        );
+
+                        break;
+                }
+
+                break;
+        }
+
+        return $query
+
+            ->groupBy(
+                'items.blizzard_id',
+                'items.name',
+                'items.quality',
+                'items.item_class',
+                'items.item_subclass',
+                'items.inventory_type',
+                'items.icon_url'
+            )
+
             ->orderBy('items.name')
+
             ->paginate($perPage)
+
+            /*
+             * Importantísimo:
+             * mantiene category/subcategory al cambiar de página.
+             */
             ->withQueryString();
     }
 
@@ -983,10 +1369,10 @@ class BlizzApiService
 
         $responses = Http::pool(
             fn($pool) =>
-            collect($toDownload)->map(
-                fn($url, $itemId) =>
-                $pool->as($itemId)->timeout(15)->get($url)
-            )->all()
+                collect($toDownload)->map(
+                    fn($url, $itemId) =>
+                        $pool->as($itemId)->timeout(15)->get($url)
+                )->all()
         );
 
         foreach ($toDownload as $itemId => $url) {
